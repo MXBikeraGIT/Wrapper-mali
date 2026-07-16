@@ -11,8 +11,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: leegao/bionic-vulkan-wrapper
-          # This is the critical fix: pointing to the 'wrapper' branch
-          ref: wrapper 
+          ref: wrapper
 
       - name: Install dependencies
         run: |
@@ -28,19 +27,17 @@ jobs:
 
       - name: Apply Mali workarounds
         run: |
-          # Patching directly into the source
+          # Targeting the correct file path: src/vulkan/wrapper/wrapper_physical_device.c
           sed -i '/if (res != VK_SUCCESS)/a \
           \    if (strstr(phys_dev->device_props.deviceName, "Mali")) {\
           \        if (phys_dev->device_props.limits.maxStorageBufferRange > 128 * 1024 * 1024)\
           \            phys_dev->device_props.limits.maxStorageBufferRange = 128 * 1024 * 1024;\
           \        phys_dev->features.features.shaderStorageBufferArrayDynamicIndexing = VK_TRUE;\
-          \    }' src/vulkan/wrap/wrap_physical_device.c
+          \    }' src/vulkan/wrapper/wrapper_physical_device.c
 
       - name: Configure Mesa
         run: |
           export ANDROID_NDK=${{ steps.ndk.outputs.ndk-path }}
-          # The wrapper branch has its own structure, 
-          # Meson will now correctly find the meson.build file
           meson setup build \
             --cross-file cross_files/android-aarch64 \
             -Dplatforms=android \
@@ -54,4 +51,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: libvulkan_wrapper
-          path: build/src/vulkan/wrap/libvulkan_wrapper.so
+          # Ensure this path matches the actual output location in the wrapper branch
+          path: build/src/vulkan/wrapper/libvulkan_wrapper.so
