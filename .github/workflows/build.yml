@@ -1,4 +1,4 @@
-name: Build Leegao Wrapper
+name: Build Leegao Wrapper (Mali Workarounds)
 
 on:
   workflow_dispatch:
@@ -11,13 +11,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: leegao/bionic-vulkan-wrapper
-          # Removing 'ref: main' allows GitHub to automatically find the correct default branch
+          # This is the critical fix: pointing to the 'wrapper' branch
+          ref: wrapper 
 
-      - name: Install Dependencies
+      - name: Install dependencies
         run: |
           sudo apt update
           sudo apt install -y python3-pip meson ninja-build git cmake
-          # Mako is required by Mesa's build system for generating code
           pip3 install mako
 
       - name: Setup Android NDK (r28)
@@ -26,10 +26,21 @@ jobs:
         with:
           ndk-version: r28
 
+      - name: Apply Mali workarounds
+        run: |
+          # Patching directly into the source
+          sed -i '/if (res != VK_SUCCESS)/a \
+          \    if (strstr(phys_dev->device_props.deviceName, "Mali")) {\
+          \        if (phys_dev->device_props.limits.maxStorageBufferRange > 128 * 1024 * 1024)\
+          \            phys_dev->device_props.limits.maxStorageBufferRange = 128 * 1024 * 1024;\
+          \        phys_dev->features.features.shaderStorageBufferArrayDynamicIndexing = VK_TRUE;\
+          \    }' src/vulkan/wrap/wrap_physical_device.c
+
       - name: Configure Mesa
         run: |
           export ANDROID_NDK=${{ steps.ndk.outputs.ndk-path }}
-          # Use the repository's native cross-file for Android
+          # The wrapper branch has its own structure, 
+          # Meson will now correctly find the meson.build file
           meson setup build \
             --cross-file cross_files/android-aarch64 \
             -Dplatforms=android \
@@ -39,7 +50,7 @@ jobs:
       - name: Compile
         run: ninja -C build
 
-      - name: Upload Binary
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: libvulkan_wrapper
