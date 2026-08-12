@@ -1,4 +1,6 @@
+#define _GNU_SOURCE
 #include <vulkan/vulkan.h>
+#include <dlfcn.h>
 #include <vector>
 #include <cstdint>
 #include <cstddef>
@@ -63,13 +65,30 @@ std::vector<uint32_t> rewrite_spirv_with_mesa(
     return spirv;
 }
 
-// Driver dispatch interface (implemented in bridge.cpp / output.cpp)
-extern "C" VkResult dispatch_vkCreateShaderModule(
+// Fallback dispatch function defined as weak to resolve linking if bridge.cpp doesn't export it
+extern "C" __attribute__((weak)) VkResult dispatch_vkCreateShaderModule(
     VkDevice device,
     const VkShaderModuleCreateInfo* pCreateInfo,
     const VkAllocationCallbacks* pAllocator,
     VkShaderModule* pShaderModule
-);
+) {
+    typedef VkResult (VKAPI_PTR *PFN_vkCreateShaderModule)(
+        VkDevice, const VkShaderModuleCreateInfo*, const VkAllocationCallbacks*, VkShaderModule*
+    );
+
+    static PFN_vkCreateShaderModule real_fn = nullptr;
+    if (!real_fn) {
+        real_fn = reinterpret_cast<PFN_vkCreateShaderModule>(
+            dlsym(RTLD_NEXT, "vkCreateShaderModule")
+        );
+    }
+
+    if (real_fn) {
+        return real_fn(device, pCreateInfo, pAllocator, pShaderModule);
+    }
+
+    return VK_ERROR_INITIALIZATION_FAILED;
+}
 
 // Wrapper Hook Function referenced by bridge.cpp
 extern "C" VKAPI_ATTR VkResult VKAPI_CALL wrapper_vkCreateShaderModule(
