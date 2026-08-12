@@ -7,7 +7,6 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
-# FIX 1: Grant write permissions to release artifacts
 permissions:
   contents: write
 
@@ -16,10 +15,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Build Tools & Cross-Compiler
+      - name: Install Build Dependencies & Cross-Compiler
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -38,20 +37,30 @@ jobs:
         run: |
           git clone --depth 1 --branch 25.2 https://gitlab.freedesktop.org/mesa/mesa.git mesa
 
-      - name: Inject Wrapper Source into Mesa Tree
+      - name: Inject Wrapper & Patch Mesa Tree
         run: |
-          # Create driver folder inside Mesa
-          mkdir -p mesa/src/vulkan/drivers/wrapper
-          
-          # Copy C++ sources, headers, and meson script into Mesa
-          cp -r src/* mesa/src/vulkan/drivers/wrapper/
-          if [ -d "include" ]; then cp -r include mesa/src/vulkan/drivers/wrapper/; fi
-          cp cross_aarch64.txt mesa/
-          
-          # Register 'wrapper' in Mesa's vulkan-drivers options
-          sed -i "s/'swrast'/'swrast', 'wrapper'/g" mesa/meson_options.txt
+          # 1. Detect correct meson options file (meson.options vs meson_options.txt)
+          if [ -f "mesa/meson.options" ]; then
+            OPTIONS_FILE="mesa/meson.options"
+          elif [ -f "mesa/meson_options.txt" ]; then
+            OPTIONS_FILE="mesa/meson_options.txt"
+          else
+            echo "::error::Could not find meson.options or meson_options.txt in Mesa tree!"
+            exit 1
+          fi
 
-      - name: Configure Mesa Build Pipeline
+          echo "Found options file: ${OPTIONS_FILE}"
+
+          # 2. Register 'wrapper' in allowed vulkan drivers array
+          sed -i "s/'swrast'/'swrast', 'wrapper'/g" "${OPTIONS_FILE}"
+
+          # 3. Copy driver source into Mesa tree
+          mkdir -p mesa/src/vulkan/drivers/wrapper
+          cp -r src/* mesa/src/vulkan/drivers/wrapper/
+          if [ -d "include" ]; then cp -r include/* mesa/src/vulkan/drivers/wrapper/; fi
+          cp cross_aarch64.txt mesa/
+
+      - name: Configure Mesa Build
         run: |
           cd mesa
           meson setup build \
@@ -74,7 +83,6 @@ jobs:
           cd mesa
           ninja -C build src/vulkan/drivers/wrapper/libvulkan_wrapper.so
           
-          # Extract compiled library back to main staging directory
           mkdir -p ../usr/lib
           cp build/src/vulkan/drivers/wrapper/libvulkan_wrapper.so ../usr/lib/libvulkan_wrapper.so
 
@@ -95,13 +103,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # FIX 2: Bypasses Node 24 self-signed SSL certificate check
           NODE_TLS_REJECT_UNAUTHORIZED: '0'
         with:
-          # FIX 3: Explicitly set target tag name to avoid refs/heads/main mismatch
           tag_name: "testing"
           name: "Nightly / Testing Build"
-          body: "Automated release build with dispatch tables, extension filtering, and SPIR-V patching."
+          body: "Automated build with Mesa 25.2 NIR/SPIR-V shader rewriting and Vulkan dispatch tables."
           draft: false
           prerelease: true
           files: |
