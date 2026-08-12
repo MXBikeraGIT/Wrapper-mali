@@ -36,27 +36,6 @@
 #define VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_ENABLE_FEATURES_EXT static_cast<VkStructureType>(1000102000)
 #endif
 
-typedef struct VkPhysicalDeviceRobustness2FeaturesEXT {
-    VkStructureType    sType;
-    void*              pNext;
-    VkBool32           robustBufferAccess2;
-    VkBool32           robustImageAccess2;
-    VkBool32           nullDescriptor;
-} VkPhysicalDeviceRobustness2FeaturesEXT;
-
-typedef struct VkPhysicalDeviceTransformFeedbackFeaturesEXT {
-    VkStructureType    sType;
-    void*              pNext;
-    VkBool32           transformFeedback;
-    VkBool32           geometryStreams;
-} VkPhysicalDeviceTransformFeedbackFeaturesEXT;
-
-typedef struct VkPhysicalDeviceDepthClipEnableFeaturesEXT {
-    VkStructureType    sType;
-    void*              pNext;
-    VkBool32           depthClipEnable;
-} VkPhysicalDeviceDepthClipEnableFeaturesEXT;
-
 // Faked extensions required to pass DXVK 2.0 initialization checks
 static const char* FAKED_EXTENSIONS[] = {
     VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,
