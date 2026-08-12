@@ -18,8 +18,21 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Build Dependencies & Toolchains
+      - name: Setup Multiarch & Install Dependencies
         run: |
+          # 1. Enable ARM64 architecture
+          sudo dpkg --add-architecture arm64
+
+          # 2. Separate x86_64 (archive.ubuntu.com) and arm64 (ports.ubuntu.com) repos for Ubuntu 24.04
+          sudo sed -i 's/deb http/deb [arch=amd64,i386] http/g' /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true
+          UBUNTU_CODENAME=$(lsb_release -cs)
+          sudo bash -c "cat <<EOF > /etc/apt/sources.list.d/arm64.list
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ ${UBUNTU_CODENAME} main restricted universe multiverse
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ ${UBUNTU_CODENAME}-updates main restricted universe multiverse
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ ${UBUNTU_CODENAME}-security main restricted universe multiverse
+          EOF"
+
+          # 3. Update APT and install build tools & ARM64 libs
           sudo apt-get update
           sudo apt-get install -y \
             python3-pip \
@@ -31,10 +44,22 @@ jobs:
             g++-aarch64-linux-gnu \
             gcc-aarch64-linux-gnu \
             zstd \
-            libvulkan-dev
-          
-          # Upgrade Meson via PyPI to get Meson >= 1.4.0 required by Mesa 25.2
-          pip3 install --upgrade meson
+            libvulkan-dev \
+            libdrm-dev:arm64
+
+          # 4. Upgrade Meson to >=1.4.0 via PyPI
+          pip3 install --upgrade meson --break-system-packages || pip3 install --upgrade meson
+
+      - name: Create Cross Pkg-Config Wrapper
+        run: |
+          sudo bash -c 'cat << "EOF" > /usr/local/bin/aarch64-linux-gnu-pkg-config
+          #!/bin/sh
+          export PKG_CONFIG_DIR=""
+          export PKG_CONFIG_LIBDIR="/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig"
+          export PKG_CONFIG_SYSROOT_DIR="/"
+          exec pkg-config "$@"
+          EOF'
+          sudo chmod +x /usr/local/bin/aarch64-linux-gnu-pkg-config
 
       - name: Clone Mesa 25.2
         run: |
