@@ -1,95 +1,58 @@
-name: Build and Package Vulkan Wrapper
+name: Build Bionic Vulkan Wrapper
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ main, master ]
   pull_request:
-    branches: [ "main", "master" ]
+    branches: [ main, master ]
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
-  build-and-package:
+  build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Compiler & Build Tools
+      - name: Install Dependencies & Cross-Compiler
         run: |
           sudo apt-get update
-          sudo apt-get install -y g++-aarch64-linux-gnu libvulkan-dev zstd tar
+          sudo apt-get install -y g++-aarch64-linux-gnu zstd libvulkan-dev
 
-      - name: Fetch Khronos Vulkan Headers
-        run: |
-          git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git /tmp/Vulkan-Headers
-          mkdir -p include
-          cp -r /tmp/Vulkan-Headers/include/* include/
-
-      - name: Build Both Shared Libraries
+      - name: Build Shared Library
         run: |
           mkdir -p usr/lib
-          
-          # 1. Compile Vulkan Wrapper
           aarch64-linux-gnu-g++ -shared -fPIC -O3 \
             src/bridge.cpp \
             src/logic.cpp \
             src/output.cpp \
             -Iinclude -Isrc -I. -ldl -o usr/lib/libvulkan_wrapper.so
 
-          # 2. Compile Main Hook
-          aarch64-linux-gnu-g++ -shared -fPIC -O3 \
-            src/main_hook.cpp \
-            -Iinclude -Isrc -I. -ldl -o usr/lib/libmain_hook.so
-
-          ls -la usr/lib/
-
-      - name: Generate ICD Manifest
+      - name: Package Archive
         run: |
-          mkdir -p usr/share/vulkan/icd.d
-          cat << 'EOF' > usr/share/vulkan/icd.d/wrapper_icd.aarch64.json
-          {
-              "ICD": {
-                  "api_version": "1.3.289",
-                  "library_path": "libvulkan_wrapper.so"
-              },
-              "file_format_version": "1.0.0"
-          }
-          EOF
+          tar -I 'zstd --ultra -22' -cvf wrapper.tzst usr/
 
-      - name: Create wrapper.tzst Bundle
-        run: |
-          export COPYFILE_DISABLE=1
-          tar --exclude='._*' \
-              --exclude='.DS_Store' \
-              --exclude='PaxHeader' \
-              -caf wrapper.tzst usr/
-          ls -lh wrapper.tzst
-
-      - name: Upload Artifact 1 - Standalone libvulkan_wrapper.so
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: libvulkan_wrapper.so
-          path: usr/lib/libvulkan_wrapper.so
-
-      - name: Upload Artifact 2 - wrapper.tzst Bundle
-        uses: actions/upload-artifact@v4
-        with:
-          name: wrapper.tzst
-          path: wrapper.tzst
-
-      - name: Create/Update GitHub Release "testing"
-        uses: softprops/action-gh-release@v2
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
-        with:
-          tag_name: testing
-          name: testing
-          body: ""
-          make_latest: true
-          files: |
-            wrapper.tzst
+          name: bionic-vulkan-wrapper
+          path: |
             usr/lib/libvulkan_wrapper.so
+            wrapper.tzst
+
+      - name: Create or Update GitHub Release
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_TLS_REJECT_UNAUTHORIZED: '0'
+        with:
+          tag_name: "testing"
+          name: "Nightly / Testing Build"
+          body: "Automated release build with Lee Gao dispatch tables, extension filtering, and SPIR-V patching."
+          draft: false
+          prerelease: true
+          files: |
+            usr/lib/libvulkan_wrapper.so
+            wrapper.tzst
