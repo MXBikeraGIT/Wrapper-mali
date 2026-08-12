@@ -1,25 +1,35 @@
-project('bionic-vulkan-wrapper', 'cpp',
-  version: '1.0.0',
-  default_options: ['cpp_std=c++17']
+project('bionic_vulkan_wrapper', 'cpp', 'c',
+  version : '1.0.0',
+  default_options : ['c_std=c11', 'cpp_std=c++17', 'buildtype=release']
 )
 
-cc = meson.get_compiler('cpp')
-dl_dep = cc.find_library('dl', required: true)
-log_dep = cc.find_library('log', required: true)
+cpp = meson.get_compiler('cpp')
 
-# Include directory object
-inc = include_directories('include')
+# Dynamic linking dependency
+dl_dep = cpp.find_library('dl', required : true)
 
-# Sources relative to project root
+# Include paths for your wrapper and Mesa 25.2 headers
+inc_dirs = include_directories(
+  'include',
+  'src',
+  '.',
+  'mesa/include',
+  'mesa/src',
+  'mesa/src/vulkan/util',
+  'mesa/src/vulkan/runtime'
+)
+
 sources = files(
   'src/bridge.cpp',
   'src/logic.cpp',
   'src/output.cpp'
 )
 
-shared_library('vulkan_wrapper',
+shared_library(
+  'vulkan_wrapper',
   sources,
-  include_directories: inc,
-  dependencies: [dl_dep, log_dep],
-  install: true
+  include_directories : inc_dirs,
+  dependencies : [dl_dep],
+  cpp_args : ['-O3', '-fPIC'],
+  install : true
 )
