@@ -7,6 +7,9 @@ on:
     branches: [ "main", "master" ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-arm64:
     runs-on: ubuntu-latest
@@ -63,3 +66,13 @@ jobs:
         with:
           name: libvulkan_wrapper.so
           path: build/libvulkan_wrapper.so
+
+      - name: Create or Update GitHub Release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "build/libvulkan_wrapper.so"
+          tag: "testing"
+          name: "testing"
+          body: ""
+          allowUpdates: true
+          token: ${{ secrets.GITHUB_TOKEN }}
