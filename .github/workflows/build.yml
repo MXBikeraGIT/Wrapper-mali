@@ -87,57 +87,79 @@ jobs:
       - name: Clone Mesa 25.2
         run: |
           git clone --depth 1 --branch 25.2 https://gitlab.freedesktop.org/mesa/mesa.git mesa
-          
-      - name: Inject Custom Wrapper & Patch Meson Build
+
+      - name: Inject Custom Wrapper & Patch Mesa Tree
         run: |
-          echo "=== Copying custom source files into Mesa tree ==="
+          echo "=== 1. Ensuring cross_aarch64.txt exists ==="
+          if [ ! -f "cross_aarch64.txt" ]; then
+            python3 -c "
+          content = '''[binaries]
+          c = 'aarch64-linux-gnu-gcc'
+          cpp = 'aarch64-linux-gnu-g++'
+          ar = 'aarch64-linux-gnu-ar'
+          strip = 'aarch64-linux-gnu-strip'
+          pkg-config = '/usr/local/bin/aarch64-linux-gnu-pkg-config'
+
+          [host_machine]
+          system = 'linux'
+          cpu_family = 'aarch64'
+          cpu = 'aarch64'
+          endian = 'little'
+          '''
+          with open('cross_aarch64.txt', 'w') as f:
+              f.write(content)
+          "
+          fi
+          cp cross_aarch64.txt mesa/
+
+          echo "=== 2. Copying source files into Mesa ==="
           mkdir -p mesa/src/vulkan/wrapper
-          
-          # Copy your repo's source files into Mesa's vulkan wrapper directory
-          cp main_hook.cpp bridge.cpp logic.cpp output.cpp wrapper_logger.cpp wrapper_logger.h mesa/src/vulkan/wrapper/
+          if [ -d "src" ]; then cp -r src/* mesa/src/vulkan/wrapper/; fi
+          for f in main_hook.cpp bridge.cpp logic.cpp output.cpp wrapper_logger.cpp wrapper_logger.h; do
+            if [ -f "$f" ]; then cp "$f" mesa/src/vulkan/wrapper/; fi
+          done
 
-          echo "=== Generating mesa/src/vulkan/wrapper/meson.build ==="
-          cat << 'EOF' > mesa/src/vulkan/wrapper/meson.build
-# src/vulkan/wrapper/meson.build (Generated during CI)
+          echo "=== 3. Writing mesa/src/vulkan/wrapper/meson.build ==="
+          python3 -c "
+          import os
+          content = '''# src/vulkan/wrapper/meson.build (Generated during CI)
 
-wrapper_sources = files(
-  'main_hook.cpp',
-  'bridge.cpp',
-  'logic.cpp',
-  'output.cpp',
-  'wrapper_logger.cpp',
-)
+          wrapper_sources = files(
+            'main_hook.cpp',
+            'bridge.cpp',
+            'logic.cpp',
+            'output.cpp',
+            'wrapper_logger.cpp',
+          )
 
-wrapper_includes = [
-  inc_include,        # Top-level include/
-  inc_src,            # Top-level src/
-  inc_compiler,       # Provides src/compiler/ and generated glsl/nir headers
-  inc_util,           # Provides src/util/ (ralloc.h, etc.)
-  inc_vulkan_util,    # Provides src/vulkan/util/
-  include_directories('.'),
-]
+          wrapper_includes = [
+            inc_include,        # Top-level include/
+            inc_src,            # Top-level src/
+            inc_compiler,       # Provides src/compiler/ and generated glsl/nir headers
+            inc_util,           # Provides src/util/ (ralloc.h, etc.)
+            inc_vulkan_util,    # Provides src/vulkan/util/
+            include_directories('.'),
+          ]
 
-libvulkan_wrapper = shared_library(
-  'vulkan_wrapper',
-  wrapper_sources,
-  include_directories : wrapper_includes,
-  dependencies : [
-    idep_vulkan_runtime, # Mesa Vulkan runtime dispatch structures
-    idep_nir,            # Forces Python header generation (builtin_types.h) before building
-    dep_dl,
-    dep_thread,
-  ],
-  gnu_symbol_visibility : 'default', # Export symbols so dlsym finds them in Winlator
-  install : true,
-)
-EOF
+          libvulkan_wrapper = shared_library(
+            'vulkan_wrapper',
+            wrapper_sources,
+            include_directories : wrapper_includes,
+            dependencies : [
+              idep_vulkan_runtime, # Mesa Vulkan runtime dispatch structures
+              idep_nir,            # Forces Python header generation (builtin_types.h) before building
+              dep_dl,
+              dep_thread,
+            ],
+            gnu_symbol_visibility : 'default', # Export symbols so dlsym finds them in Winlator
+            install : true,
+          )
+          '''
+          with open('mesa/src/vulkan/wrapper/meson.build', 'w') as f:
+              f.write(content)
+          "
 
-          echo "=== Verifying created files ==="
-          ls -la mesa/src/vulkan/wrapper/
-
-      - name: Inject Wrapper & Patch Mesa Tree
-        run: |
-          # 1. Allow 'wrapper' in meson.options
+          echo "=== 4. Patching Mesa Options & Vulkan Build ==="
           if [ -f "mesa/meson.options" ]; then
             OPTIONS_FILE="mesa/meson.options"
           elif [ -f "mesa/meson_options.txt" ]; then
@@ -149,7 +171,6 @@ EOF
 
           sed -i "s/'swrast'/'swrast', 'wrapper'/g" "${OPTIONS_FILE}"
 
-          # 2. Patch src/vulkan/meson.build using _vulkan_drivers variable
           VULKAN_MESON="mesa/src/vulkan/meson.build"
           if [ -f "${VULKAN_MESON}" ]; then
             echo "" >> "${VULKAN_MESON}"
@@ -161,11 +182,8 @@ EOF
             exit 1
           fi
 
-          # 3. Copy source files into mesa/src/vulkan/wrapper/
-          mkdir -p mesa/src/vulkan/wrapper
-          cp -r src/* mesa/src/vulkan/wrapper/
-          if [ -d "include" ]; then cp -r include/* mesa/src/vulkan/wrapper/; fi
-          cp cross_aarch64.txt mesa/
+          echo "=== Verifying created files ==="
+          ls -la mesa/src/vulkan/wrapper/
 
       - name: Configure Mesa Build
         run: |
