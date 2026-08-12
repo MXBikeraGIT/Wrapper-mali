@@ -14,10 +14,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Compiler Dependencies
+      - name: Setup Compiler & Vulkan Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y g++-aarch64-linux-gnu
+          sudo apt-get install -y g++-aarch64-linux-gnu vulkan-headers libvulkan-dev
 
       - name: Compile libvulkan_wrapper.so
         run: |
@@ -26,7 +26,7 @@ jobs:
             src/bridge.cpp \
             src/logic.cpp \
             src/output.cpp \
-            -Isrc -I. -ldl -o usr/lib/libvulkan_wrapper.so
+            -Iinclude -Isrc -I. -ldl -o usr/lib/libvulkan_wrapper.so
 
       - name: Stash Wrapper Artifact
         uses: actions/upload-artifact@v4
@@ -40,17 +40,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Compiler Dependencies
+      - name: Setup Compiler & Vulkan Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y g++-aarch64-linux-gnu
+          sudo apt-get install -y g++-aarch64-linux-gnu vulkan-headers libvulkan-dev
 
       - name: Compile libmain_hook.so
         run: |
           mkdir -p usr/lib
           aarch64-linux-gnu-g++ -shared -fPIC -O3 \
             src/main_hook.cpp \
-            -Isrc -I. -ldl -o usr/lib/libmain_hook.so
+            -Iinclude -Isrc -I. -ldl -o usr/lib/libmain_hook.so
 
       - name: Stash Hook Artifact
         uses: actions/upload-artifact@v4
