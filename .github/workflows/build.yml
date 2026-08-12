@@ -23,8 +23,17 @@ jobs:
           # 1. Enable ARM64 architecture
           sudo dpkg --add-architecture arm64
 
-          # 2. Separate x86_64 (archive.ubuntu.com) and arm64 (ports.ubuntu.com) repos for Ubuntu 24.04
-          sudo sed -i 's/deb http/deb [arch=amd64,i386] http/g' /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true
+          # 2. Restrict Ubuntu 24.04 DEB822 default sources to x86
+          if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+            sudo sed -i 's/Types: deb/Types: deb\nArchitectures: amd64 i386/' /etc/apt/sources.list.d/ubuntu.sources
+          fi
+
+          # Restrict legacy sources.list if present
+          if [ -f /etc/apt/sources.list ]; then
+            sudo sed -i 's/deb http/deb [arch=amd64,i386] http/g' /etc/apt/sources.list
+          fi
+
+          # 3. Add ARM64 ports repository
           UBUNTU_CODENAME=$(lsb_release -cs)
           sudo bash -c "cat <<EOF > /etc/apt/sources.list.d/arm64.list
           deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ ${UBUNTU_CODENAME} main restricted universe multiverse
@@ -32,7 +41,7 @@ jobs:
           deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ ${UBUNTU_CODENAME}-security main restricted universe multiverse
           EOF"
 
-          # 3. Update APT and install build tools & ARM64 libs
+          # 4. Update APT and install dependencies
           sudo apt-get update
           sudo apt-get install -y \
             python3-pip \
@@ -47,7 +56,7 @@ jobs:
             libvulkan-dev \
             libdrm-dev:arm64
 
-          # 4. Upgrade Meson to >=1.4.0 via PyPI
+          # 5. Upgrade Meson to >=1.4.0 via PyPI
           pip3 install --upgrade meson --break-system-packages || pip3 install --upgrade meson
 
       - name: Create Cross Pkg-Config Wrapper
