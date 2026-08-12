@@ -1,7 +1,17 @@
+# src/vulkan/wrapper/meson.build
+
+wrapper_sources = files(
+  'main_hook.cpp',
+  'bridge.cpp',
+  'logic.cpp',
+  'output.cpp',
+  'wrapper_logger.cpp',
+)
+
 wrapper_includes = [
   inc_include,        # Top-level include/
   inc_src,            # Top-level src/
-  inc_compiler,       # <--- ADD THIS (provides src/compiler/ and generated headers)
+  inc_compiler,       # src/compiler/ (provides builtin_types.h)
   inc_util,           # src/util/
   inc_vulkan_util,    # src/vulkan/util/
   include_directories('.'),
@@ -13,7 +23,7 @@ libvulkan_wrapper = shared_library(
   include_directories : wrapper_includes,
   dependencies : [
     idep_vulkan_runtime, # Mesa's internal Vulkan runtime
-    idep_nir,            # <--- ADD THIS (forces generation of builtin_types.h before compilation)
+    idep_nir,            # Forces build order so builtin_types.h exists before logic.cpp compiles
     dep_dl,
     dep_thread,
   ],
