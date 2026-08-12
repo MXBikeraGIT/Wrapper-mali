@@ -8,16 +8,16 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-wrapper:
+  build-and-package-bundle:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Compiler Dependencies
+      - name: Install Compiler & Build Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y g++-aarch64-linux-gnu libvulkan-dev
+          sudo apt-get install -y g++-aarch64-linux-gnu libvulkan-dev zstd tar
 
       - name: Fetch Khronos Vulkan Headers
         run: |
@@ -25,90 +25,23 @@ jobs:
           mkdir -p include
           cp -r /tmp/Vulkan-Headers/include/* include/
 
-      - name: Compile libvulkan_wrapper.so
+      - name: Build Both Shared Libraries
         run: |
           mkdir -p usr/lib
+          
+          # 1. Compile Vulkan Wrapper
           aarch64-linux-gnu-g++ -shared -fPIC -O3 \
             src/bridge.cpp \
             src/logic.cpp \
             src/output.cpp \
             -Iinclude -Isrc -I. -ldl -o usr/lib/libvulkan_wrapper.so
 
-      - name: Stash Wrapper Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: raw-vulkan-wrapper-so
-          path: usr/lib/libvulkan_wrapper.so
-
-  build-hook:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Compiler Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y g++-aarch64-linux-gnu libvulkan-dev
-
-      - name: Fetch Khronos Vulkan Headers
-        run: |
-          git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git /tmp/Vulkan-Headers
-          mkdir -p include
-          cp -r /tmp/Vulkan-Headers/include/* include/
-
-      - name: Compile libmain_hook.so
-        run: |
-          mkdir -p usr/lib
+          # 2. Compile Main Hook
           aarch64-linux-gnu-g++ -shared -fPIC -O3 \
             src/main_hook.cpp \
             -Iinclude -Isrc -I. -ldl -o usr/lib/libmain_hook.so
 
-      - name: Stash Hook Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: raw-main-hook-so
-          path: usr/lib/libmain_hook.so
-
-  package-standalone-so:
-    needs: build-wrapper
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download Wrapper Binary
-        uses: actions/download-artifact@v4
-        with:
-          name: raw-vulkan-wrapper-so
-          path: standalone/
-
-      - name: Upload Standalone Shared Object Asset
-        uses: actions/upload-artifact@v4
-        with:
-          name: libvulkan_wrapper-standalone-release
-          path: standalone/libvulkan_wrapper.so
-
-  package-tzst:
-    needs: [build-wrapper, build-hook]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Compression Tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y zstd tar
-
-      - name: Download Wrapper Binary
-        uses: actions/download-artifact@v4
-        with:
-          name: raw-vulkan-wrapper-so
-          path: usr/lib/
-
-      - name: Download Hook Binary
-        uses: actions/download-artifact@v4
-        with:
-          name: raw-main-hook-so
-          path: usr/lib/
+          ls -la usr/lib/
 
       - name: Generate ICD Manifest
         run: |
@@ -123,21 +56,20 @@ jobs:
           }
           EOF
 
-      - name: Create wrapper.tzst Archive
+      - name: Create wrapper.tzst Bundle
         run: |
           export COPYFILE_DISABLE=1
           tar --exclude='._*' \
               --exclude='.DS_Store' \
               --exclude='PaxHeader' \
               -caf wrapper.tzst usr/
-
-      - name: Place wrapper.tzst into usr/lib/
-        run: |
+          
+          # Move wrapper.tzst into usr/lib for distribution
           mv wrapper.tzst usr/lib/
           ls -la usr/lib/
 
-      - name: Upload TZST Bundle Release Artifacts
+      - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: vulkan-wrapper-tzst-bundle-release
+          name: vulkan-wrapper-complete-bundle
           path: usr/lib/
