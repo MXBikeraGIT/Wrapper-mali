@@ -1,3 +1,7 @@
+#include <vulkan/vulkan.h>
+#include "bridge.h"
+#include <cstring>
+
 // External feature logic from logic.cpp
 extern VkResult logic_vkEnumerateDeviceExtensionProperties(VkPhysicalDevice physicalDevice, const char* pLayerName, uint32_t* pPropertyCount, VkExtensionProperties* pProperties);
 extern void logic_vkGetPhysicalDeviceFeatures2(VkPhysicalDevice physicalDevice, VkPhysicalDeviceFeatures2* pFeatures);
