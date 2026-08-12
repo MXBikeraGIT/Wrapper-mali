@@ -22,7 +22,11 @@ jobs:
       - name: Compile libvulkan_wrapper.so
         run: |
           mkdir -p usr/lib
-          aarch64-linux-gnu-g++ -shared -fPIC -O3 bridge.cpp logic.cpp output.cpp -I. -ldl -o usr/lib/libvulkan_wrapper.so
+          aarch64-linux-gnu-g++ -shared -fPIC -O3 \
+            Wrapper-Mali/src/bridge.cpp \
+            Wrapper-Mali/src/logic.cpp \
+            Wrapper-Mali/src/output.cpp \
+            -IWrapper-Mali/src -I. -ldl -o usr/lib/libvulkan_wrapper.so
 
       - name: Stash Wrapper Artifact
         uses: actions/upload-artifact@v4
@@ -44,7 +48,9 @@ jobs:
       - name: Compile libmain_hook.so
         run: |
           mkdir -p usr/lib
-          aarch64-linux-gnu-g++ -shared -fPIC -O3 main_hook.cpp -Iinclude -ldl -o usr/lib/libmain_hook.so
+          aarch64-linux-gnu-g++ -shared -fPIC -O3 \
+            Wrapper-Mali/src/main_hook.cpp \
+            -IWrapper-Mali/src -I. -ldl -o usr/lib/libmain_hook.so
 
       - name: Stash Hook Artifact
         uses: actions/upload-artifact@v4
