@@ -90,7 +90,7 @@ jobs:
 
       - name: Inject Wrapper & Patch Mesa Tree
         run: |
-          # 1. Allow 'wrapper' in options array
+          # 1. Allow 'wrapper' in meson.options
           if [ -f "mesa/meson.options" ]; then
             OPTIONS_FILE="mesa/meson.options"
           elif [ -f "mesa/meson_options.txt" ]; then
@@ -102,11 +102,11 @@ jobs:
 
           sed -i "s/'swrast'/'swrast', 'wrapper'/g" "${OPTIONS_FILE}"
 
-          # 2. Patch src/vulkan/meson.build
+          # 2. Patch src/vulkan/meson.build using _vulkan_drivers variable
           VULKAN_MESON="mesa/src/vulkan/meson.build"
           if [ -f "${VULKAN_MESON}" ]; then
             echo "" >> "${VULKAN_MESON}"
-            echo "if with_vulkan_drivers.contains('wrapper')" >> "${VULKAN_MESON}"
+            echo "if _vulkan_drivers.contains('wrapper')" >> "${VULKAN_MESON}"
             echo "  subdir('wrapper')" >> "${VULKAN_MESON}"
             echo "endif" >> "${VULKAN_MESON}"
           else
@@ -114,7 +114,7 @@ jobs:
             exit 1
           fi
 
-          # 3. Copy source files to mesa/src/vulkan/wrapper/
+          # 3. Copy source files into mesa/src/vulkan/wrapper/
           mkdir -p mesa/src/vulkan/wrapper
           cp -r src/* mesa/src/vulkan/wrapper/
           if [ -d "include" ]; then cp -r include/* mesa/src/vulkan/wrapper/; fi
