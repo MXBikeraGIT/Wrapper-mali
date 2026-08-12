@@ -1,18 +1,12 @@
-#pragma once
+#ifndef OUTPUT_H
+#define OUTPUT_H
 
-#include <vulkan/vulkan.h>
+#include <string>
+#include <vector>
+#include <cstdint>
 
-// Direct dispatch calls to Android system GPU driver (/system/lib64/libvulkan.so)
-void init_android_vulkan();
-PFN_vkVoidFunction get_real_proc_addr(VkInstance instance, const char* pName);
+void log_info(const std::string& message);
+void log_error(const std::string& message);
+void dump_spirv_file(const std::string& filename, const std::vector<uint32_t>& code);
 
-VkResult call_real_vkCreateShaderModule(
-    VkDevice device,
-    const VkShaderModuleCreateInfo* pCreateInfo,
-    const VkAllocationCallbacks* pAllocator,
-    VkShaderModule* pShaderModule);
-
-VkResult call_real_vkCreateInstance(
-    const VkInstanceCreateInfo* pCreateInfo,
-    const VkAllocationCallbacks* pAllocator,
-    VkInstance* pInstance);
+#endif
