@@ -1,55 +1,65 @@
-name: Build Leegao Wrapper (Mali Workarounds)
+name: Build Android Vulkan Wrapper
 
 on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
   workflow_dispatch:
 
 jobs:
-  build:
+  build-arm64:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout leegao wrapper source
+      - name: Checkout Repository
         uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          repository: leegao/bionic-vulkan-wrapper
-          ref: wrapper
+          python-version: '3.x'
 
-      - name: Install dependencies
+      - name: Install Meson and Ninja
         run: |
-          sudo apt update
-          sudo apt install -y python3-pip meson ninja-build git cmake
-          pip3 install mako
+          python -m pip install --upgrade pip
+          pip install meson ninja
 
-      - name: Setup Android NDK (r28)
+      - name: Set up Android NDK
         uses: nttld/setup-ndk@v1
-        id: ndk
+        id: setup-ndk
         with:
-          ndk-version: r28
+          ndk-version: r27d
 
-      - name: Apply Mali workarounds
+      - name: Generate Meson ARM64 Cross-File
         run: |
-          # Targeting the correct file path: src/vulkan/wrapper/wrapper_physical_device.c
-          sed -i '/if (res != VK_SUCCESS)/a \
-          \    if (strstr(phys_dev->device_props.deviceName, "Mali")) {\
-          \        if (phys_dev->device_props.limits.maxStorageBufferRange > 128 * 1024 * 1024)\
-          \            phys_dev->device_props.limits.maxStorageBufferRange = 128 * 1024 * 1024;\
-          \        phys_dev->features.features.shaderStorageBufferArrayDynamicIndexing = VK_TRUE;\
-          \    }' src/vulkan/wrapper/wrapper_physical_device.c
+          cat << 'EOF' > android-aarch64.ini
+          [constants]
+          ndk_path = '${{ steps.setup-ndk.outputs.ndk-path }}'
+          toolchain = ndk_path + '/toolchains/llvm/prebuilt/linux-x86_64/bin'
+          api_level = '29'
 
-      - name: Configure Mesa
-        run: |
-          export ANDROID_NDK=${{ steps.ndk.outputs.ndk-path }}
-          meson setup build \
-            --cross-file cross_files/android-aarch64 \
-            -Dplatforms=android \
-            -Dvulkan-drivers=wrap \
-            -Dbuildtype=release
+          [binaries]
+          c = toolchain + '/aarch64-linux-android' + api_level + '-clang'
+          cpp = toolchain + '/aarch64-linux-android' + api_level + '-clang++'
+          ar = toolchain + '/llvm-ar'
+          strip = toolchain + '/llvm-strip'
 
-      - name: Compile
-        run: ninja -C build
+          [host_machine]
+          system = 'android'
+          cpu_family = 'aarch64'
+          cpu = 'aarch64'
+          endian = 'little'
+          EOF
 
-      - name: Upload artifact
+      - name: Configure Meson Build Directory
+        run: meson setup build --cross-file android-aarch64.ini
+
+      - name: Compile Shared Library
+        run: meson compile -C build
+
+      - name: Upload libvulkan_wrapper.so Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: libvulkan_wrapper
-          # Ensure this path matches the actual output location in the wrapper branch
-          path: build/src/vulkan/wrapper/libvulkan_wrapper.so
+          name: libvulkan_wrapper.so
+          path: build/libvulkan_wrapper.so
