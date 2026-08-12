@@ -1,80 +1,54 @@
 #include <vulkan/vulkan.h>
-#include <dlfcn.h>
-#include <iostream>
-#include <unordered_map>
+#include <android/log.h>
+#include <cstdio>
+#include <chrono>
+#include <thread>
 #include <mutex>
+#include <vector>
 
-#include "bridge.h"
-#include "output.h"
+// Global mutex shared across wrapper modules to prevent log conflicts
+std::mutex g_wrapper_log_mutex;
 
-typedef PFN_vkVoidFunction (VKAPI_PTR *PFN_vkGetInstanceProcAddr)(VkInstance instance, const char* pName);
-typedef PFN_vkVoidFunction (VKAPI_PTR *PFN_vkGetDeviceProcAddr)(VkDevice device, const char* pName);
+// Function prototype implemented in logic.cpp
+extern "C" VkResult logic_process_spirv(
+    VkDevice device,
+    const VkShaderModuleCreateInfo* pCreateInfo,
+    const VkAllocationCallbacks* pAllocator,
+    VkShaderModule* pShaderModule
+);
 
-static void* g_real_vulkan_handle = nullptr;
-static PFN_vkGetInstanceProcAddr g_real_vkGetInstanceProcAddr = nullptr;
-
-static std::mutex g_mutex;
-
+// Bridge Hook Entry Point
 extern "C" VKAPI_ATTR VkResult VKAPI_CALL wrapper_vkCreateShaderModule(
     VkDevice device,
     const VkShaderModuleCreateInfo* pCreateInfo,
     const VkAllocationCallbacks* pAllocator,
-    VkShaderModule* pShaderModule);
+    VkShaderModule* pShaderModule
+) {
+    if (pCreateInfo && pCreateInfo->pCode && pCreateInfo->codeSize > 0) {
+        // Lock mutex to block logic/output until 3-second bridge spam finishes
+        {
+            std::lock_guard<std::mutex> lock(g_wrapper_log_mutex);
+            auto start_time = std::chrono::steady_clock::now();
 
-bool init_real_driver() {
-    if (g_real_vulkan_handle) return true;
-
-    g_real_vulkan_handle = dlopen("libvulkan.so.1", RTLD_NOW | RTLD_LOCAL);
-    if (!g_real_vulkan_handle) {
-        g_real_vulkan_handle = dlopen("libvulkan.so", RTLD_NOW | RTLD_LOCAL);
-    }
-    if (!g_real_vulkan_handle) {
-        log_error("Failed to load real libvulkan.so!");
-        return false;
-    }
-
-    g_real_vkGetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)dlsym(g_real_vulkan_handle, "vkGetInstanceProcAddr");
-    return g_real_vkGetInstanceProcAddr != nullptr;
-}
-
-PFN_vkVoidFunction get_real_instance_proc(VkInstance instance, const char* name) {
-    if (!init_real_driver()) return nullptr;
-    return g_real_vkGetInstanceProcAddr(instance, name);
-}
-
-PFN_vkVoidFunction get_real_device_proc(VkDevice device, const char* name) {
-    if (!init_real_driver()) return nullptr;
-    return g_real_vkGetInstanceProcAddr(NULL, name);
-}
-
-// Exported loader entrypoint
-extern "C" VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(
-    VkInstance instance, 
-    const char* pName) 
-{
-    if (!init_real_driver()) return nullptr;
-
-    std::string name(pName);
-
-    if (name == "vkGetInstanceProcAddr") return (PFN_vkVoidFunction)vkGetInstanceProcAddr;
-    if (name == "vkCreateShaderModule") return (PFN_vkVoidFunction)wrapper_vkCreateShaderModule;
-
-    return g_real_vkGetInstanceProcAddr(instance, pName);
-}
-
-extern "C" VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(
-    VkDevice device, 
-    const char* pName) 
-{
-    std::string name(pName);
-
-    if (name == "vkGetDeviceProcAddr") return (PFN_vkVoidFunction)vkGetDeviceProcAddr;
-    if (name == "vkCreateShaderModule") return (PFN_vkVoidFunction)wrapper_vkCreateShaderModule;
-
-    PFN_vkGetDeviceProcAddr real_gdpa = get_real_instance_proc<PFN_vkGetDeviceProcAddr>(NULL, "vkGetDeviceProcAddr");
-    if (real_gdpa) {
-        return real_gdpa(device, pName);
+            while (std::chrono::steady_clock::now() - start_time < std::chrono::seconds(3)) {
+                __android_log_print(ANDROID_LOG_INFO, "Winlator", "got code");
+                fprintf(stderr, "[Winlator] got code\n");
+                fflush(stderr);
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+        }
     }
 
-    return nullptr;
+    // Forward execution to logic stage
+    return logic_process_spirv(device, pCreateInfo, pAllocator, pShaderModule);
+}
+
+// Fallback alias for bridge procurement
+extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule(
+    VkDevice device,
+    const VkShaderModuleCreateInfo* pCreateInfo,
+    const VkAllocationCallbacks* pAllocator,
+    VkShaderModule* pShaderModule
+) {
+    return wrapper_vkCreateShaderModule(device, pCreateInfo, pAllocator, pShaderModule);
 }
