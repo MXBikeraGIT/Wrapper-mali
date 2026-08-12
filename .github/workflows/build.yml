@@ -41,7 +41,7 @@ jobs:
           deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ ${UBUNTU_CODENAME}-security main restricted universe multiverse
           EOF"
 
-          # 4. Update APT and install dependencies
+          # 4. Update APT and install dependencies (including Wayland/X11 tools & ARM64 headers)
           sudo apt-get update
           sudo apt-get install -y \
             python3-pip \
@@ -53,8 +53,15 @@ jobs:
             g++-aarch64-linux-gnu \
             gcc-aarch64-linux-gnu \
             zstd \
-            libvulkan-dev \
-            libdrm-dev:arm64
+            libwayland-bin \
+            wayland-protocols \
+            libvulkan-dev:arm64 \
+            libdrm-dev:arm64 \
+            libwayland-dev:arm64 \
+            libx11-dev:arm64 \
+            libxcb1-dev:arm64 \
+            libx11-xcb-dev:arm64 \
+            libxrandr-dev:arm64
 
           # 5. Upgrade Meson to >=1.4.0 via PyPI
           pip3 install --upgrade meson --break-system-packages || pip3 install --upgrade meson
