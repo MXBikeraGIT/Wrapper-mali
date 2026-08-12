@@ -1,37 +1,36 @@
-#define _GNU_SOURCE
 #include <vulkan/vulkan.h>
-#include <dlfcn.h>
+#include <android/log.h>
+#include <cstdio>
+#include <chrono>
+#include <thread>
+#include <mutex>
 #include <vector>
 #include <cstdint>
-#include <cstddef>
-#include <cstring>
 
-// Standard SPIR-V Header Magic & Opcodes
 constexpr uint32_t SPIRV_MAGIC_NUMBER = 0x07230203;
-
 constexpr uint16_t OP_NOP        = 0;
 constexpr uint16_t OP_CAPABILITY = 17;
-
-// Capabilities problematic on Mali GPUs
 constexpr uint32_t SPV_CAP_FLOAT64 = 12;
 constexpr uint32_t SPV_CAP_INT64   = 11;
 
-// Core SPIR-V Rewriter Function
-std::vector<uint32_t> rewrite_spirv_with_mesa(
-    const uint32_t* input_spirv,
-    size_t word_count,
-    VkShaderStageFlagBits stage
-) {
-    if (!input_spirv || word_count < 5) {
+extern std::mutex g_wrapper_log_mutex;
+
+// Function prototype implemented in output.cpp
+extern "C" VkResult output_send_to_driver(
+    VkDevice device,
+    const VkShaderModuleCreateInfo* pCreateInfo,
+    const VkAllocationCallbacks* pAllocator,
+    VkShaderModule* pShaderModule
+);
+
+// Mali-Friendly SPIR-V Rewriter Core
+static std::vector<uint32_t> rewrite_spirv_bytecode(const uint32_t* input_spirv, size_t word_count) {
+    if (!input_spirv || word_count < 5 || input_spirv[0] != SPIRV_MAGIC_NUMBER) {
         return {};
     }
 
-    if (input_spirv[0] != SPIRV_MAGIC_NUMBER) {
-        return std::vector<uint32_t>(input_spirv, input_spirv + word_count);
-    }
-
     std::vector<uint32_t> spirv(input_spirv, input_spirv + word_count);
-    size_t idx = 5; // Skip standard 5-word header
+    size_t idx = 5;
 
     while (idx < spirv.size()) {
         uint32_t instruction = spirv[idx];
@@ -42,82 +41,54 @@ std::vector<uint32_t> rewrite_spirv_with_mesa(
             break;
         }
 
-        switch (opcode) {
-            case OP_CAPABILITY: {
-                if (inst_word_count >= 2) {
-                    uint32_t capability = spirv[idx + 1];
-                    // Strip unsupported Float64 / Int64 capabilities for Mali drivers
-                    if (capability == SPV_CAP_FLOAT64 || capability == SPV_CAP_INT64) {
-                        for (size_t i = 0; i < inst_word_count; ++i) {
-                            spirv[idx + i] = (1 << 16) | OP_NOP;
-                        }
-                    }
+        if (opcode == OP_CAPABILITY && inst_word_count >= 2) {
+            uint32_t capability = spirv[idx + 1];
+            if (capability == SPV_CAP_FLOAT64 || capability == SPV_CAP_INT64) {
+                for (size_t i = 0; i < inst_word_count; ++i) {
+                    spirv[idx + i] = (1 << 16) | OP_NOP;
                 }
-                break;
             }
-            default:
-                break;
         }
-
         idx += inst_word_count;
     }
 
     return spirv;
 }
 
-// Fallback dispatch function defined as weak to resolve linking if bridge.cpp doesn't export it
-extern "C" __attribute__((weak)) VkResult dispatch_vkCreateShaderModule(
-    VkDevice device,
-    const VkShaderModuleCreateInfo* pCreateInfo,
-    const VkAllocationCallbacks* pAllocator,
-    VkShaderModule* pShaderModule
-) {
-    typedef VkResult (VKAPI_PTR *PFN_vkCreateShaderModule)(
-        VkDevice, const VkShaderModuleCreateInfo*, const VkAllocationCallbacks*, VkShaderModule*
-    );
-
-    static PFN_vkCreateShaderModule real_fn = nullptr;
-    if (!real_fn) {
-        real_fn = reinterpret_cast<PFN_vkCreateShaderModule>(
-            dlsym(RTLD_NEXT, "vkCreateShaderModule")
-        );
-    }
-
-    if (real_fn) {
-        return real_fn(device, pCreateInfo, pAllocator, pShaderModule);
-    }
-
-    return VK_ERROR_INITIALIZATION_FAILED;
-}
-
-// Wrapper Hook Function referenced by bridge.cpp
-extern "C" VKAPI_ATTR VkResult VKAPI_CALL wrapper_vkCreateShaderModule(
+// Logic Stage Handler
+extern "C" VkResult logic_process_spirv(
     VkDevice device,
     const VkShaderModuleCreateInfo* pCreateInfo,
     const VkAllocationCallbacks* pAllocator,
     VkShaderModule* pShaderModule
 ) {
     if (!pCreateInfo || !pCreateInfo->pCode || pCreateInfo->codeSize == 0) {
-        return dispatch_vkCreateShaderModule(device, pCreateInfo, pAllocator, pShaderModule);
+        return output_send_to_driver(device, pCreateInfo, pAllocator, pShaderModule);
     }
 
-    // 1. Convert byte size to word count
+    // Wait until bridge log finishes before spamming logic logs
+    {
+        std::lock_guard<std::mutex> lock(g_wrapper_log_mutex);
+        auto start_time = std::chrono::steady_clock::now();
+
+        while (std::chrono::steady_clock::now() - start_time < std::chrono::seconds(3)) {
+            __android_log_print(ANDROID_LOG_INFO, "Winlator", "processed code");
+            fprintf(stderr, "[Winlator] processed code\n");
+            fflush(stderr);
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    }
+
+    // Execute SPIR-V rewrite
     size_t word_count = pCreateInfo->codeSize / sizeof(uint32_t);
+    std::vector<uint32_t> rewritten_spirv = rewrite_spirv_bytecode(pCreateInfo->pCode, word_count);
 
-    // 2. Perform Mali SPIR-V rewriting
-    std::vector<uint32_t> rewritten_spirv = rewrite_spirv_with_mesa(
-        pCreateInfo->pCode,
-        word_count,
-        VK_SHADER_STAGE_ALL
-    );
-
-    // 3. Patch creation info struct if rewriting produced modified bytecode
     VkShaderModuleCreateInfo modified_info = *pCreateInfo;
     if (!rewritten_spirv.empty()) {
         modified_info.pCode = rewritten_spirv.data();
         modified_info.codeSize = rewritten_spirv.size() * sizeof(uint32_t);
     }
 
-    // 4. Pass down modified SPIR-V to driver dispatch
-    return dispatch_vkCreateShaderModule(device, &modified_info, pAllocator, pShaderModule);
+    // Pass to output stage
+    return output_send_to_driver(device, &modified_info, pAllocator, pShaderModule);
 }
