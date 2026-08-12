@@ -1,63 +1,82 @@
-name: Build Bionic Vulkan Wrapper
+#include "dispatch.h"
+#include <cstring>
+#include <android/log.h>
 
-on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
-  workflow_dispatch:
+#define LOG_TAG "WrapperBridge"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 
-# Grants GITHUB_TOKEN write access to create releases and upload build assets
-permissions:
-  contents: write
+extern "C" PFN_vkGetInstanceProcAddr get_global_vkGetInstanceProcAddr();
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+extern "C" {
+    VkResult logic_vkEnumerateInstanceExtensionProperties(const char* pLayerName, uint32_t* pPropertyCount, VkExtensionProperties* pProperties);
+    VkResult logic_vkEnumerateInstanceLayerProperties(uint32_t* pPropertyCount, VkLayerProperties* pProperties);
+    VkResult logic_vkCreateInstance(const VkInstanceCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkInstance* pInstance);
+    void logic_vkDestroyInstance(VkInstance instance, const VkAllocationCallbacks* pAllocator);
+    VkResult logic_vkCreateDevice(VkPhysicalDevice physicalDevice, const VkDeviceCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDevice* pDevice);
+    void logic_vkDestroyDevice(VkDevice device, const VkAllocationCallbacks* pAllocator);
+    VkResult logic_vkCreateShaderModule(VkDevice device, const VkShaderModuleCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkShaderModule* pShaderModule);
+}
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+#define CHECK_HOOK(func_name, logic_handler) \
+    if (strcmp(pName, func_name) == 0) return reinterpret_cast<PFN_vkVoidFunction>(logic_handler);
 
-      - name: Install Dependencies & Cross-Compiler
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y g++-aarch64-linux-gnu zstd libvulkan-dev
+extern "C" {
 
-      - name: Build Shared Library
-        run: |
-          mkdir -p usr/lib
-          aarch64-linux-gnu-g++ -shared -fPIC -O3 \
-            src/bridge.cpp \
-            src/logic.cpp \
-            src/output.cpp \
-            -Iinclude -Isrc -I. -ldl -o usr/lib/libvulkan_wrapper.so
+VKAPI_ATTR VkResult VKAPI_CALL vk_icdNegotiateLoaderICDInterfaceVersion(uint32_t* pSupportedVersion) {
+    if (!pSupportedVersion) return VK_ERROR_INITIALIZATION_FAILED;
+    if (*pSupportedVersion > 5) *pSupportedVersion = 5;
+    return VK_SUCCESS;
+}
 
-      - name: Package Archive
-        run: |
-          tar -I 'zstd --ultra -22' -cvf wrapper.tzst usr/
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instance, const char* pName) {
+    if (!pName) return nullptr;
 
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: bionic-vulkan-wrapper
-          path: |
-            usr/lib/libvulkan_wrapper.so
-            wrapper.tzst
+    // 1. Check Hook List
+    CHECK_HOOK("vkEnumerateInstanceExtensionProperties", logic_vkEnumerateInstanceExtensionProperties);
+    CHECK_HOOK("vkEnumerateInstanceLayerProperties", logic_vkEnumerateInstanceLayerProperties);
+    CHECK_HOOK("vkCreateInstance", logic_vkCreateInstance);
+    CHECK_HOOK("vkDestroyInstance", logic_vkDestroyInstance);
+    CHECK_HOOK("vkCreateDevice", logic_vkCreateDevice);
+    CHECK_HOOK("vkDestroyDevice", logic_vkDestroyDevice);
+    CHECK_HOOK("vkCreateShaderModule", logic_vkCreateShaderModule);
 
-      - name: Create or Update GitHub Release
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-        uses: softprops/action-gh-release@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NODE_TLS_REJECT_UNAUTHORIZED: '0'
-          NODE_OPTIONS: '--use-system-ca'
-        with:
-          tag_name: "testing"
-          name: "Nightly / Testing Build"
-          body: "Automated release build with Lee Gao dispatch tables, extension filtering, and SPIR-V patching."
-          draft: false
-          prerelease: true
-          files: |
-            usr/lib/libvulkan_wrapper.so
-            wrapper.tzst
+    // 2. Fallback to Instance Dispatch Table
+    if (instance != VK_NULL_HANDLE) {
+        InstanceDispatchTable* dt = get_instance_dispatch(instance);
+        if (dt && dt->vkGetInstanceProcAddr) {
+            return dt->vkGetInstanceProcAddr(dt->real_instance, pName);
+        }
+    }
+
+    // 3. Fallback to Global Driver Entry Point
+    PFN_vkGetInstanceProcAddr global_gpa = get_global_vkGetInstanceProcAddr();
+    if (global_gpa) {
+        return global_gpa(instance, pName);
+    }
+
+    return nullptr;
+}
+
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice device, const char* pName) {
+    if (!pName) return nullptr;
+
+    // 1. Check Device-Level Hook List
+    CHECK_HOOK("vkCreateShaderModule", logic_vkCreateShaderModule);
+    CHECK_HOOK("vkDestroyDevice", logic_vkDestroyDevice);
+
+    // 2. Fallback to Device Dispatch Table
+    if (device != VK_NULL_HANDLE) {
+        DeviceDispatchTable* dt = get_device_dispatch(device);
+        if (dt && dt->vkGetDeviceProcAddr) {
+            return dt->vkGetDeviceProcAddr(dt->real_device, pName);
+        }
+    }
+
+    return vkGetInstanceProcAddr(VK_NULL_HANDLE, pName);
+}
+
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vk_icdGetInstanceProcAddr(VkInstance instance, const char* pName) {
+    return vkGetInstanceProcAddr(instance, pName);
+}
+
+} // extern "C"
