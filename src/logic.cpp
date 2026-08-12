@@ -3,70 +3,71 @@
 #include <cstdint>
 #include <cstddef>
 
-// Mesa Utility & Memory Allocation
-#include "util/ralloc.h"
+// Standard SPIR-V Constants
+constexpr uint32_t SPIRV_MAGIC_NUMBER = 0x07230203;
 
-// Mesa NIR Compiler Core (resolves via -I../src/compiler/nir)
-#include "nir.h"
+// Opcodes
+constexpr uint16_t OP_NOP              = 0;
+constexpr uint16_t OP_CAPABILITY       = 17;
+constexpr uint16_t OP_DECORATE         = 71;
+constexpr uint16_t OP_MEMBER_DECORATE  = 72;
 
-// Mesa SPIR-V Ingest Header (resolves via -I../src or -Isrc)
-#include "compiler/spirv/nir_spirv.h"
+// Capabilities problematic on Mali GPUs
+constexpr uint32_t SPV_CAP_FLOAT64     = 12;
+constexpr uint32_t SPV_CAP_INT64       = 11;
+constexpr uint32_t SPV_CAP_INT16       = 22;
 
-// Helper function to map Vulkan shader stage flags to Mesa gl_shader_stage
-static gl_shader_stage vk_stage_to_mesa(VkShaderStageFlagBits stage) {
-    switch (stage) {
-        case VK_SHADER_STAGE_VERTEX_BIT:                  return MESA_SHADER_VERTEX;
-        case VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT:    return MESA_SHADER_TESS_CTRL;
-        case VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT: return MESA_SHADER_TESS_EVAL;
-        case VK_SHADER_STAGE_GEOMETRY_BIT:               return MESA_SHADER_GEOMETRY;
-        case VK_SHADER_STAGE_FRAGMENT_BIT:               return MESA_SHADER_FRAGMENT;
-        case VK_SHADER_STAGE_COMPUTE_BIT:                return MESA_SHADER_COMPUTE;
-        default:                                           return MESA_SHADER_UNKNOWN;
-    }
-}
+// Decorations
+constexpr uint32_t SPV_DEC_RELAXED_PRECISION = 0;
 
-// Ingests SPIR-V into Mesa NIR intermediate representation
 std::vector<uint32_t> rewrite_spirv_with_mesa(
     const uint32_t* input_spirv,
     size_t word_count,
     VkShaderStageFlagBits stage
 ) {
-    if (!input_spirv || word_count == 0) {
+    if (!input_spirv || word_count < 5) {
         return {};
     }
 
-    // 1. Create parent ralloc memory context
-    void *mem_ctx = ralloc_context(NULL);
-
-    // 2. Convert Vulkan stage to Mesa gl_shader_stage
-    gl_shader_stage gl_stage = vk_stage_to_mesa(stage);
-
-    // 3. Configure options for SPIR-V -> NIR ingestion
-    struct spirv_to_nir_options spirv_in_opts = {};
-    spirv_in_opts.environment_is_vulkan = true;
-
-    // 4. Ingest SPIR-V binary into Mesa NIR
-    nir_shader *nir = spirv_to_nir(
-        input_spirv,
-        word_count,
-        NULL,             // Specialization constants
-        0,                // Num specialization constants
-        gl_stage,
-        "main",           // Entry point name
-        &spirv_in_opts,
-        NULL              // Target NIR compiler options
-    );
-
-    if (!nir) {
-        ralloc_free(mem_ctx);
-        return {};
+    // 1. Verify Header
+    if (input_spirv[0] != SPIRV_MAGIC_NUMBER) {
+        return std::vector<uint32_t>(input_spirv, input_spirv + word_count);
     }
 
-    // 5. Copy or pass through shader binary data
-    std::vector<uint32_t> result(input_spirv, input_spirv + word_count);
+    std::vector<uint32_t> spirv(input_spirv, input_spirv + word_count);
+    size_t idx = 5; // Skip 5-word header
 
-    // 6. Clean up ralloc context and all allocated NIR structures
-    ralloc_free(mem_ctx);
+    // 2. Process Instructions
+    while (idx < spirv.size()) {
+        uint32_t instruction = spirv[idx];
+        uint16_t opcode = static_cast<uint16_t>(instruction & 0xFFFF);
+        uint16_t inst_word_count = static_cast<uint16_t>(instruction >> 16);
 
-    return result;
+        if (inst_word_count == 0 || (idx + inst_word_count) > spirv.size()) {
+            break;
+        }
+
+        switch (opcode) {
+            case OP_CAPABILITY: {
+                if (inst_word_count >= 2) {
+                    uint32_t capability = spirv[idx + 1];
+
+                    // Strip Float64 / Int64 capabilities that cause hardware fallback or crashes on Mali
+                    if (capability == SPV_CAP_FLOAT64 || capability == SPV_CAP_INT64) {
+                        for (size_t i = 0; i < inst_word_count; ++i) {
+                            spirv[idx + i] = (1 << 16) | OP_NOP;
+                        }
+                    }
+                }
+                break;
+            }
+
+            default:
+                break;
+        }
+
+        idx += inst_word_count;
+    }
+
+    return spirv;
 }
