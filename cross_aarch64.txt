@@ -11,6 +11,6 @@ cpu_family = 'aarch64'
 cpu        = 'armv8-a'
 endian     = 'little'
 
-[properties]
+[built-in options]
 c_args     = ['-O3', '-fPIC']
 cpp_args   = ['-O3', '-fPIC', '-std=c++17']
