@@ -18,11 +18,11 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Build Dependencies & Cross-Compiler
+      - name: Install Build Dependencies & Toolchains
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            meson \
+            python3-pip \
             ninja-build \
             bison \
             flex \
@@ -32,6 +32,9 @@ jobs:
             gcc-aarch64-linux-gnu \
             zstd \
             libvulkan-dev
+          
+          # Upgrade Meson via PyPI to get Meson >= 1.4.0 required by Mesa 25.2
+          pip3 install --upgrade meson
 
       - name: Clone Mesa 25.2
         run: |
@@ -39,7 +42,6 @@ jobs:
 
       - name: Inject Wrapper & Patch Mesa Tree
         run: |
-          # 1. Detect correct meson options file (meson.options vs meson_options.txt)
           if [ -f "mesa/meson.options" ]; then
             OPTIONS_FILE="mesa/meson.options"
           elif [ -f "mesa/meson_options.txt" ]; then
@@ -51,10 +53,8 @@ jobs:
 
           echo "Found options file: ${OPTIONS_FILE}"
 
-          # 2. Register 'wrapper' in allowed vulkan drivers array
           sed -i "s/'swrast'/'swrast', 'wrapper'/g" "${OPTIONS_FILE}"
 
-          # 3. Copy driver source into Mesa tree
           mkdir -p mesa/src/vulkan/drivers/wrapper
           cp -r src/* mesa/src/vulkan/drivers/wrapper/
           if [ -d "include" ]; then cp -r include/* mesa/src/vulkan/drivers/wrapper/; fi
