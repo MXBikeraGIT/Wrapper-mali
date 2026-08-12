@@ -5,21 +5,21 @@ project('bionic-vulkan-wrapper', 'cpp',
 
 cc = meson.get_compiler('cpp')
 dl_dep = cc.find_library('dl', required: true)
+log_dep = cc.find_library('log', required: true)
 
-# Point to include/ directory for header files
+# Include directory object
 inc = include_directories('include')
 
-# Define C++ source files
+# Sources relative to project root
 sources = files(
   'src/bridge.cpp',
   'src/logic.cpp',
   'src/output.cpp'
 )
 
-# Output target: libvulkan_wrapper.so
 shared_library('vulkan_wrapper',
   sources,
   include_directories: inc,
-  dependencies: [dl_dep],
+  dependencies: [dl_dep, log_dep],
   install: true
 )
