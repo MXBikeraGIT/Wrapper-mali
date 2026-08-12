@@ -87,6 +87,53 @@ jobs:
       - name: Clone Mesa 25.2
         run: |
           git clone --depth 1 --branch 25.2 https://gitlab.freedesktop.org/mesa/mesa.git mesa
+          
+      - name: Inject Custom Wrapper & Patch Meson Build
+        run: |
+          echo "=== Copying custom source files into Mesa tree ==="
+          mkdir -p mesa/src/vulkan/wrapper
+          
+          # Copy your repo's source files into Mesa's vulkan wrapper directory
+          cp main_hook.cpp bridge.cpp logic.cpp output.cpp wrapper_logger.cpp wrapper_logger.h mesa/src/vulkan/wrapper/
+
+          echo "=== Generating mesa/src/vulkan/wrapper/meson.build ==="
+          cat << 'EOF' > mesa/src/vulkan/wrapper/meson.build
+# src/vulkan/wrapper/meson.build (Generated during CI)
+
+wrapper_sources = files(
+  'main_hook.cpp',
+  'bridge.cpp',
+  'logic.cpp',
+  'output.cpp',
+  'wrapper_logger.cpp',
+)
+
+wrapper_includes = [
+  inc_include,        # Top-level include/
+  inc_src,            # Top-level src/
+  inc_compiler,       # Provides src/compiler/ and generated glsl/nir headers
+  inc_util,           # Provides src/util/ (ralloc.h, etc.)
+  inc_vulkan_util,    # Provides src/vulkan/util/
+  include_directories('.'),
+]
+
+libvulkan_wrapper = shared_library(
+  'vulkan_wrapper',
+  wrapper_sources,
+  include_directories : wrapper_includes,
+  dependencies : [
+    idep_vulkan_runtime, # Mesa Vulkan runtime dispatch structures
+    idep_nir,            # Forces Python header generation (builtin_types.h) before building
+    dep_dl,
+    dep_thread,
+  ],
+  gnu_symbol_visibility : 'default', # Export symbols so dlsym finds them in Winlator
+  install : true,
+)
+EOF
+
+          echo "=== Verifying created files ==="
+          ls -la mesa/src/vulkan/wrapper/
 
       - name: Inject Wrapper & Patch Mesa Tree
         run: |
