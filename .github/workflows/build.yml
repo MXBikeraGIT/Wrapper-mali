@@ -90,7 +90,7 @@ jobs:
 
       - name: Inject Wrapper & Patch Mesa Tree
         run: |
-          # Locate meson.options file
+          # 1. Allow 'wrapper' in options array
           if [ -f "mesa/meson.options" ]; then
             OPTIONS_FILE="mesa/meson.options"
           elif [ -f "mesa/meson_options.txt" ]; then
@@ -100,25 +100,24 @@ jobs:
             exit 1
           fi
 
-          # 1. Allow 'wrapper' in options array
           sed -i "s/'swrast'/'swrast', 'wrapper'/g" "${OPTIONS_FILE}"
 
-          # 2. Tell Mesa's driver builder to include the wrapper subdirectory
-          DRIVERS_MESON="mesa/src/vulkan/drivers/meson.build"
-          if [ -f "${DRIVERS_MESON}" ]; then
-            echo "" >> "${DRIVERS_MESON}"
-            echo "if with_vulkan_drivers.contains('wrapper')" >> "${DRIVERS_MESON}"
-            echo "  subdir('wrapper')" >> "${DRIVERS_MESON}"
-            echo "endif" >> "${DRIVERS_MESON}"
+          # 2. Patch src/vulkan/meson.build
+          VULKAN_MESON="mesa/src/vulkan/meson.build"
+          if [ -f "${VULKAN_MESON}" ]; then
+            echo "" >> "${VULKAN_MESON}"
+            echo "if with_vulkan_drivers.contains('wrapper')" >> "${VULKAN_MESON}"
+            echo "  subdir('wrapper')" >> "${VULKAN_MESON}"
+            echo "endif" >> "${VULKAN_MESON}"
           else
-            echo "::error::Could not find src/vulkan/drivers/meson.build!"
+            echo "::error::Could not find src/vulkan/meson.build!"
             exit 1
           fi
 
-          # 3. Copy custom driver source code into Mesa source tree
-          mkdir -p mesa/src/vulkan/drivers/wrapper
-          cp -r src/* mesa/src/vulkan/drivers/wrapper/
-          if [ -d "include" ]; then cp -r include/* mesa/src/vulkan/drivers/wrapper/; fi
+          # 3. Copy source files to mesa/src/vulkan/wrapper/
+          mkdir -p mesa/src/vulkan/wrapper
+          cp -r src/* mesa/src/vulkan/wrapper/
+          if [ -d "include" ]; then cp -r include/* mesa/src/vulkan/wrapper/; fi
           cp cross_aarch64.txt mesa/
 
       - name: Configure Mesa Build
