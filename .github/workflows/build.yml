@@ -23,10 +23,10 @@ jobs:
         run: |
           mkdir -p usr/lib
           aarch64-linux-gnu-g++ -shared -fPIC -O3 \
-            Wrapper-Mali/src/bridge.cpp \
-            Wrapper-Mali/src/logic.cpp \
-            Wrapper-Mali/src/output.cpp \
-            -IWrapper-Mali/src -I. -ldl -o usr/lib/libvulkan_wrapper.so
+            src/bridge.cpp \
+            src/logic.cpp \
+            src/output.cpp \
+            -Isrc -I. -ldl -o usr/lib/libvulkan_wrapper.so
 
       - name: Stash Wrapper Artifact
         uses: actions/upload-artifact@v4
@@ -49,8 +49,8 @@ jobs:
         run: |
           mkdir -p usr/lib
           aarch64-linux-gnu-g++ -shared -fPIC -O3 \
-            Wrapper-Mali/src/main_hook.cpp \
-            -IWrapper-Mali/src -I. -ldl -o usr/lib/libmain_hook.so
+            src/main_hook.cpp \
+            -Isrc -I. -ldl -o usr/lib/libmain_hook.so
 
       - name: Stash Hook Artifact
         uses: actions/upload-artifact@v4
