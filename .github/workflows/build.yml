@@ -112,16 +112,18 @@ jobs:
           fi
           cp cross_aarch64.txt mesa/
 
-          echo "=== 2. Copying source files into Mesa ==="
+          echo "=== 2. Copying source files and headers into Mesa ==="
           mkdir -p mesa/src/vulkan/wrapper
           if [ -d "src" ]; then cp -r src/* mesa/src/vulkan/wrapper/; fi
-          for f in main_hook.cpp bridge.cpp logic.cpp output.cpp wrapper_logger.cpp wrapper_logger.h; do
-            if [ -f "$f" ]; then cp "$f" mesa/src/vulkan/wrapper/; fi
-          done
+          if [ -d "include" ]; then cp -r include/* mesa/src/vulkan/wrapper/; fi
+          
+          # Copy all source and header files from repo root into Mesa wrapper directory
+          cp *.cpp mesa/src/vulkan/wrapper/ 2>/dev/null || true
+          cp *.hpp mesa/src/vulkan/wrapper/ 2>/dev/null || true
+          cp *.h mesa/src/vulkan/wrapper/ 2>/dev/null || true
 
           echo "=== 3. Writing mesa/src/vulkan/wrapper/meson.build ==="
           python3 -c "
-          import os
           content = '''# src/vulkan/wrapper/meson.build (Generated during CI)
 
           wrapper_sources = files(
@@ -182,7 +184,7 @@ jobs:
             exit 1
           fi
 
-          echo "=== Verifying created files ==="
+          echo "=== Verifying created files in mesa/src/vulkan/wrapper/ ==="
           ls -la mesa/src/vulkan/wrapper/
 
       - name: Configure Mesa Build
