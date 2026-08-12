@@ -1,31 +1,29 @@
+# src/meson.build
+
 wrapper_sources = files(
-  'bridge.cpp',
-  'logic.cpp',
-  'output.cpp',
+  # add your .c / .cpp source files here
+  # e.g., 'wrapper.c',
 )
+
+# Mesa 25.2 exposes these modular include handles instead of a single inc_vulkan
+wrapper_includes = [
+  inc_include,        # Top-level include/ (vulkan/vulkan_core.h, etc.)
+  inc_src,            # Top-level src/
+  inc_util,           # Mesa core utilities (src/util/)
+  inc_vulkan_util,    # Vulkan utilities (src/vulkan/util/)
+  inc_vulkan_runtime, # Vulkan runtime infrastructure & dispatch tables
+  include_directories('.'), # Local wrapper directory
+]
 
 libvulkan_wrapper = shared_library(
   'vulkan_wrapper',
-  [wrapper_sources],
-  include_directories : [
-    inc_include,
-    inc_src,
-    inc_vulkan,
-    inc_compiler,
-    include_directories('.'),
-    include_directories('../../../include'),
-    include_directories('../../../compiler'),
-    include_directories('../../../compiler/nir'),
-    include_directories('../../../compiler/spirv'),
-  ],
+  wrapper_sources,
+  include_directories : wrapper_includes,
   dependencies : [
-    dep_vulkan_runtime,
-    dep_vulkan_util,
-    idep_mesautil,
-    idep_nir,
     dep_dl,
-    dep_m,
+    dep_thread,
+    dep_valgrind,
   ],
-  cpp_args : ['-O3', '-fPIC', '-std=c++17', '-DVK_PROTOTYPES'],
+  gnu_symbol_visibility : 'hidden',
   install : true,
 )
