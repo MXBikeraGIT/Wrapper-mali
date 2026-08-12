@@ -1,7 +1,11 @@
 # src/meson.build
 
 wrapper_sources = files(
-  # add your source files here
+  'main_hook.cpp',
+  'bridge.cpp',
+  'logic.cpp',
+  'output.cpp',
+  'wrapper_logger.cpp',
 )
 
 wrapper_includes = [
@@ -21,6 +25,6 @@ libvulkan_wrapper = shared_library(
     dep_dl,
     dep_thread,
   ],
-  gnu_symbol_visibility : 'hidden',
+  gnu_symbol_visibility : 'default', # Set to default for dlsym visibility
   install : true,
 )
