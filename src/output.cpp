@@ -1,99 +1,102 @@
-#include "dispatch.h"
-#include <dlfcn.h>
-#include <android/log.h>
+#include <vulkan/vulkan.h>
+#include <iostream>
+#include <vector>
 
-#define LOG_TAG "WrapperOutput"
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+// Mesa 25.2 NIR & SPIR-V headers
+extern "C" {
+#include "compiler/nir/nir.h"
+#include "compiler/spirv/nir_spirv.h"
+}
 
-static void* g_real_vulkan_handle = nullptr;
-static PFN_vkGetInstanceProcAddr g_real_vkGetInstanceProcAddr = nullptr;
+#include "bridge.h"
 
-static std::unordered_map<VkInstance, InstanceDispatchTable> g_instance_map;
-static std::mutex g_instance_mutex;
+// Default NIR compiler options targeting standard SPIR-V capabilities
+static const struct nir_shader_compiler_options default_nir_options = {
+    .lower_fdiv = true,
+    .fuse_ffma16 = true,
+    .fuse_ffma32 = true,
+    .fuse_ffma64 = true,
+};
 
-static std::unordered_map<VkDevice, DeviceDispatchTable> g_device_map;
-static std::mutex g_device_mutex;
+static const struct spirv_to_nir_options default_spirv_options = {
+    .environment = NIR_SPIRV_VULKAN,
+};
 
-extern "C" void init_android_vulkan() {
-    if (g_real_vulkan_handle && g_real_vkGetInstanceProcAddr) return;
+// Function to process and rewrite SPIR-V using Mesa's NIR framework
+std::vector<uint32_t> rewrite_spirv_with_mesa(const uint32_t* input_spirv, size_t word_count, VkShaderStageFlagBits stage) {
+    if (!input_spirv || word_count == 0) return {};
 
-    LOGI("Loading system Vulkan library...");
-    const char* paths[] = {
-        "/system/lib64/libvulkan.so",
-        "/vendor/lib64/hw/vulkan.mali.so",
-        "/apex/com.android.runtime/lib64/bionic/libvulkan.so",
-        "libvulkan.so.1",
-        "libvulkan.so",
-        nullptr
-    };
+    // Translate gl_shader_stage from Vulkan stage
+    gl_shader_stage gl_stage = MESA_SHADER_COMPUTE;
+    if (stage & VK_SHADER_STAGE_VERTEX_BIT) gl_stage = MESA_SHADER_VERTEX;
+    else if (stage & VK_SHADER_STAGE_FRAGMENT_BIT) gl_stage = MESA_SHADER_FRAGMENT;
 
-    for (int i = 0; paths[i] != nullptr; ++i) {
-        g_real_vulkan_handle = dlopen(paths[i], RTLD_NOW | RTLD_GLOBAL);
-        if (g_real_vulkan_handle) {
-            LOGI("Loaded driver at %s", paths[i]);
-            break;
-        }
+    // 1. Convert incoming SPIR-V into Mesa NIR AST
+    nir_shader *nir = spirv_to_nir(
+        input_spirv,
+        word_count,
+        NULL, 0, // Specialization constants
+        gl_stage,
+        "main",
+        &default_spirv_options,
+        &default_nir_options
+    );
+
+    if (!nir) {
+        std::cerr << "[Wrapper] Failed to parse SPIR-V with Mesa spirv_to_nir. Falling back to original." << std::endl;
+        return std::vector<uint32_t>(input_spirv, input_spirv + word_count);
     }
 
-    if (g_real_vulkan_handle) {
-        g_real_vkGetInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
-            dlsym(g_real_vulkan_handle, "vkGetInstanceProcAddr")
-        );
+    // 2. Perform Mesa NIR Passes / Custom Modifications
+    ralloc_autofree const void *mem_ctx = ralloc_context(NULL);
+    
+    // Example Mesa transformation passes:
+    nir_copy_prop(nir);
+    nir_opt_dce(nir);
+    nir_opt_algebraic(nir);
+    nir_shader_gather_info(nir, nir_shader_get_entrypoint(nir));
+
+    // 3. Serialize transformed NIR back into valid SPIR-V binary
+    struct spirv_options spirv_out_opts = {};
+    size_t out_word_count = 0;
+    uint32_t *out_spirv = nir_to_spirv(nir, &spirv_out_opts, &out_word_count);
+
+    std::vector<uint32_t> result_spirv;
+    if (out_spirv && out_word_count > 0) {
+        result_spirv.assign(out_spirv, out_spirv + out_word_count);
+        free(out_spirv);
+    } else {
+        result_spirv.assign(input_spirv, input_spirv + word_count);
     }
+
+    // Free NIR representation memory context
+    ralloc_free(nir);
+
+    return result_spirv;
 }
 
-extern "C" PFN_vkGetInstanceProcAddr get_global_vkGetInstanceProcAddr() {
-    init_android_vulkan();
-    return g_real_vkGetInstanceProcAddr;
-}
+// Intercept vkCreateShaderModule
+extern "C" VKAPI_ATTR VkResult VKAPI_CALL wrapper_vkCreateShaderModule(
+    VkDevice device,
+    const VkShaderModuleCreateInfo* pCreateInfo,
+    const VkAllocationCallbacks* pAllocator,
+    VkShaderModule* pShaderModule)
+{
+    if (!pCreateInfo || !pCreateInfo->pCode) return VK_ERROR_INITIALIZATION_FAILED;
 
-void register_instance(VkInstance wrapper_inst, VkInstance real_inst, PFN_vkGetInstanceProcAddr gpa) {
-    std::lock_guard<std::mutex> lock(g_instance_mutex);
-    InstanceDispatchTable table{};
-    table.real_instance = real_inst;
-    table.vkGetInstanceProcAddr = gpa;
+    // Rewrite SPIR-V using Mesa NIR
+    std::vector<uint32_t> modified_spirv = rewrite_spirv_with_mesa(
+        pCreateInfo->pCode,
+        pCreateInfo->codeSize / sizeof(uint32_t),
+        VK_SHADER_STAGE_ALL // Process general shader stages
+    );
 
-    // Resolve instance-level function pointers
-    table.vkDestroyInstance = (PFN_vkDestroyInstance)gpa(real_inst, "vkDestroyInstance");
-    table.vkEnumeratePhysicalDevices = (PFN_vkEnumeratePhysicalDevices)gpa(real_inst, "vkEnumeratePhysicalDevices");
-    table.vkGetPhysicalDeviceProperties = (PFN_vkGetPhysicalDeviceProperties)gpa(real_inst, "vkGetPhysicalDeviceProperties");
-    table.vkGetPhysicalDeviceProperties2 = (PFN_vkGetPhysicalDeviceProperties2)gpa(real_inst, "vkGetPhysicalDeviceProperties2");
-    table.vkCreateDevice = (PFN_vkCreateDevice)gpa(real_inst, "vkCreateDevice");
+    // Create modified create info struct
+    VkShaderModuleCreateInfo modified_info = *pCreateInfo;
+    modified_info.pCode = modified_spirv.data();
+    modified_info.codeSize = modified_spirv.size() * sizeof(uint32_t);
 
-    g_instance_map[wrapper_inst] = table;
-}
-
-void unregister_instance(VkInstance wrapper_inst) {
-    std::lock_guard<std::mutex> lock(g_instance_mutex);
-    g_instance_map.erase(wrapper_inst);
-}
-
-InstanceDispatchTable* get_instance_dispatch(VkInstance inst) {
-    std::lock_guard<std::mutex> lock(g_instance_mutex);
-    auto it = g_instance_map.find(inst);
-    return (it != g_instance_map.end()) ? &it->second : nullptr;
-}
-
-void register_device(VkDevice wrapper_dev, VkDevice real_dev, PFN_vkGetDeviceProcAddr gda) {
-    std::lock_guard<std::mutex> lock(g_device_mutex);
-    DeviceDispatchTable table{};
-    table.real_device = real_dev;
-    table.vkGetDeviceProcAddr = gda;
-
-    table.vkDestroyDevice = (PFN_vkDestroyDevice)gda(real_dev, "vkDestroyDevice");
-    table.vkCreateShaderModule = (PFN_vkCreateShaderModule)gda(real_dev, "vkCreateShaderModule");
-
-    g_device_map[wrapper_dev] = table;
-}
-
-void unregister_device(VkDevice wrapper_dev) {
-    std::lock_guard<std::mutex> lock(g_device_mutex);
-    g_device_map.erase(wrapper_dev);
-}
-
-DeviceDispatchTable* get_device_dispatch(VkDevice dev) {
-    std::lock_guard<std::mutex> lock(g_device_mutex);
-    auto it = g_device_map.find(dev);
-    return (it != g_device_map.end()) ? &it->second : nullptr;
+    // Get real device dispatch and call downstream driver
+    PFN_vkCreateShaderModule real_fn = get_real_device_proc<PFN_vkCreateShaderModule>(device, "vkCreateShaderModule");
+    return real_fn(device, &modified_info, pAllocator, pShaderModule);
 }
