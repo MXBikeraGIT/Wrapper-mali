@@ -7,6 +7,10 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+# FIX 1: Grant write permissions to release artifacts
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -46,11 +50,13 @@ jobs:
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # FIX 2: Bypasses Node 24 self-signed SSL certificate check
           NODE_TLS_REJECT_UNAUTHORIZED: '0'
         with:
+          # FIX 3: Explicitly set target tag name to avoid refs/heads/main mismatch
           tag_name: "testing"
           name: "Nightly / Testing Build"
-          body: "Automated release build with Lee Gao dispatch tables, extension filtering, and SPIR-V patching."
+          body: "Automated release build with dispatch tables, extension filtering, and SPIR-V patching."
           draft: false
           prerelease: true
           files: |
