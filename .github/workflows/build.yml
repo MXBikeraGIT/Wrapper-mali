@@ -19,7 +19,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Dependencies & Cross-Compiler
+      - name: Install Build Tools & Cross-Compiler
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -38,17 +38,45 @@ jobs:
         run: |
           git clone --depth 1 --branch 25.2 https://gitlab.freedesktop.org/mesa/mesa.git mesa
 
-      - name: Configure Meson Build
+      - name: Inject Wrapper Source into Mesa Tree
         run: |
+          # Create driver folder inside Mesa
+          mkdir -p mesa/src/vulkan/drivers/wrapper
+          
+          # Copy C++ sources, headers, and meson script into Mesa
+          cp -r src/* mesa/src/vulkan/drivers/wrapper/
+          if [ -d "include" ]; then cp -r include mesa/src/vulkan/drivers/wrapper/; fi
+          cp cross_aarch64.txt mesa/
+          
+          # Register 'wrapper' in Mesa's vulkan-drivers options
+          sed -i "s/'swrast'/'swrast', 'wrapper'/g" mesa/meson_options.txt
+
+      - name: Configure Mesa Build Pipeline
+        run: |
+          cd mesa
           meson setup build \
             --cross-file cross_aarch64.txt \
-            --buildtype release
+            --buildtype release \
+            -Dplatforms=x11,wayland \
+            -Dgallium-drivers="" \
+            -Dvulkan-drivers="wrapper" \
+            -Dopengl=false \
+            -Dgles1=disabled \
+            -Dgles2=disabled \
+            -Dglx=disabled \
+            -Degl=disabled \
+            -Dgbm=disabled \
+            -Dtools="" \
+            -Dbuild-tests=false
 
       - name: Compile Shared Library with Ninja
         run: |
-          ninja -C build
-          mkdir -p usr/lib
-          cp build/libvulkan_wrapper.so usr/lib/libvulkan_wrapper.so
+          cd mesa
+          ninja -C build src/vulkan/drivers/wrapper/libvulkan_wrapper.so
+          
+          # Extract compiled library back to main staging directory
+          mkdir -p ../usr/lib
+          cp build/src/vulkan/drivers/wrapper/libvulkan_wrapper.so ../usr/lib/libvulkan_wrapper.so
 
       - name: Package Archive
         run: |
