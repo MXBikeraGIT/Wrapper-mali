@@ -9,8 +9,8 @@
 // Mesa NIR Compiler Core (resolves via -I../src/compiler/nir)
 #include "nir.h"
 
-// Mesa SPIR-V Ingest Header (resolves via -I../src/compiler -> spirv/spirv_to_nir.h)
-#include "spirv/spirv_to_nir.h"
+// Mesa SPIR-V Ingest Header (resolves via -I../src or -Isrc)
+#include "compiler/spirv/nir_spirv.h"
 
 // Helper function to map Vulkan shader stage flags to Mesa gl_shader_stage
 static gl_shader_stage vk_stage_to_mesa(VkShaderStageFlagBits stage) {
