@@ -7,8 +7,9 @@
 
 extern "C" PFN_vkGetInstanceProcAddr get_global_vkGetInstanceProcAddr();
 
-// Declare logic hooks defined in logic.cpp
 extern "C" {
+    VkResult logic_vkEnumerateInstanceExtensionProperties(const char* pLayerName, uint32_t* pPropertyCount, VkExtensionProperties* pProperties);
+    VkResult logic_vkEnumerateInstanceLayerProperties(uint32_t* pPropertyCount, VkLayerProperties* pProperties);
     VkResult logic_vkCreateInstance(const VkInstanceCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkInstance* pInstance);
     void logic_vkDestroyInstance(VkInstance instance, const VkAllocationCallbacks* pAllocator);
     VkResult logic_vkCreateDevice(VkPhysicalDevice physicalDevice, const VkDeviceCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDevice* pDevice);
@@ -31,6 +32,8 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instan
     if (!pName) return nullptr;
 
     // 1. Check Hook List
+    CHECK_HOOK("vkEnumerateInstanceExtensionProperties", logic_vkEnumerateInstanceExtensionProperties);
+    CHECK_HOOK("vkEnumerateInstanceLayerProperties", logic_vkEnumerateInstanceLayerProperties);
     CHECK_HOOK("vkCreateInstance", logic_vkCreateInstance);
     CHECK_HOOK("vkDestroyInstance", logic_vkDestroyInstance);
     CHECK_HOOK("vkCreateDevice", logic_vkCreateDevice);
