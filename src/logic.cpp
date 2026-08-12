@@ -3,14 +3,13 @@
 #include <vector>
 #include <string>
 
-// Mesa 25.2 NIR & SPIR-V headers
 extern "C" {
 #include "compiler/nir/nir.h"
 #include "compiler/spirv/nir_spirv.h"
 }
 
 #include "bridge.h"
-#include "output.h" // For logging helpers
+#include "output.h"
 
 static const struct nir_shader_compiler_options default_nir_options = {
     .lower_fdiv = true,
@@ -23,7 +22,6 @@ static const struct spirv_to_nir_options default_spirv_options = {
     .environment = NIR_SPIRV_VULKAN,
 };
 
-// Core rewriting engine using Mesa 25.2 NIR
 std::vector<uint32_t> rewrite_spirv_with_mesa(const uint32_t* input_spirv, size_t word_count, VkShaderStageFlagBits stage) {
     if (!input_spirv || word_count == 0) return {};
 
@@ -31,7 +29,7 @@ std::vector<uint32_t> rewrite_spirv_with_mesa(const uint32_t* input_spirv, size_
     if (stage & VK_SHADER_STAGE_VERTEX_BIT) gl_stage = MESA_SHADER_VERTEX;
     else if (stage & VK_SHADER_STAGE_FRAGMENT_BIT) gl_stage = MESA_SHADER_FRAGMENT;
 
-    // 1. Decompile SPIR-V -> Mesa NIR AST
+    // 1. SPIR-V -> NIR AST
     nir_shader *nir = spirv_to_nir(
         input_spirv,
         word_count,
@@ -43,18 +41,18 @@ std::vector<uint32_t> rewrite_spirv_with_mesa(const uint32_t* input_spirv, size_
     );
 
     if (!nir) {
-        log_error("Failed to parse SPIR-V with Mesa spirv_to_nir. Falling back to raw bytecode.");
+        log_error("spirv_to_nir failed. Returning original SPIR-V bytecode.");
         return std::vector<uint32_t>(input_spirv, input_spirv + word_count);
     }
 
-    // 2. Run Mesa NIR optimization & transformation passes
+    // 2. Mesa Optimization Passes
     ralloc_autofree const void *mem_ctx = ralloc_context(NULL);
     nir_copy_prop(nir);
     nir_opt_dce(nir);
     nir_opt_algebraic(nir);
     nir_shader_gather_info(nir, nir_shader_get_entrypoint(nir));
 
-    // 3. Re-encode NIR AST -> SPIR-V
+    // 3. NIR AST -> SPIR-V
     struct spirv_options spirv_out_opts = {};
     size_t out_word_count = 0;
     uint32_t *out_spirv = nir_to_spirv(nir, &spirv_out_opts, &out_word_count);
@@ -63,7 +61,7 @@ std::vector<uint32_t> rewrite_spirv_with_mesa(const uint32_t* input_spirv, size_
     if (out_spirv && out_word_count > 0) {
         result_spirv.assign(out_spirv, out_spirv + out_word_count);
         free(out_spirv);
-        log_info("Successfully rewritten shader via Mesa NIR engine.");
+        log_info("Successfully re-encoded SPIR-V via Mesa 25.2 NIR.");
     } else {
         result_spirv.assign(input_spirv, input_spirv + word_count);
     }
@@ -72,7 +70,6 @@ std::vector<uint32_t> rewrite_spirv_with_mesa(const uint32_t* input_spirv, size_
     return result_spirv;
 }
 
-// Intercept vkCreateShaderModule
 extern "C" VKAPI_ATTR VkResult VKAPI_CALL wrapper_vkCreateShaderModule(
     VkDevice device,
     const VkShaderModuleCreateInfo* pCreateInfo,
@@ -81,7 +78,7 @@ extern "C" VKAPI_ATTR VkResult VKAPI_CALL wrapper_vkCreateShaderModule(
 {
     if (!pCreateInfo || !pCreateInfo->pCode) return VK_ERROR_INITIALIZATION_FAILED;
 
-    log_info("Intercepted vkCreateShaderModule - passing through Mesa NIR processor...");
+    log_info("vkCreateShaderModule intercepted -> Processing with Mesa NIR...");
 
     std::vector<uint32_t> modified_spirv = rewrite_spirv_with_mesa(
         pCreateInfo->pCode,
@@ -94,5 +91,7 @@ extern "C" VKAPI_ATTR VkResult VKAPI_CALL wrapper_vkCreateShaderModule(
     modified_info.codeSize = modified_spirv.size() * sizeof(uint32_t);
 
     PFN_vkCreateShaderModule real_fn = get_real_device_proc<PFN_vkCreateShaderModule>(device, "vkCreateShaderModule");
+    if (!real_fn) return VK_ERROR_INITIALIZATION_FAILED;
+
     return real_fn(device, &modified_info, pAllocator, pShaderModule);
 }
