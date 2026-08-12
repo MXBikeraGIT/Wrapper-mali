@@ -1,10 +1,20 @@
-#pragma once
+#ifndef BRIDGE_H
+#define BRIDGE_H
 
 #include <vulkan/vulkan.h>
 
-// Exported Vulkan ICD entry points
-extern "C" {
-    VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instance, const char* pName);
-    VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vk_icdGetInstanceProcAddr(VkInstance instance, const char* pName);
-    VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice device, const char* pName);
+bool init_real_driver();
+PFN_vkVoidFunction get_real_instance_proc(VkInstance instance, const char* name);
+PFN_vkVoidFunction get_real_device_proc(VkDevice device, const char* name);
+
+template<typename T>
+T get_real_device_proc(VkDevice device, const char* name) {
+    return reinterpret_cast<T>(get_real_device_proc(device, name));
 }
+
+template<typename T>
+T get_real_instance_proc(VkInstance instance, const char* name) {
+    return reinterpret_cast<T>(get_real_instance_proc(instance, name));
+}
+
+#endif
