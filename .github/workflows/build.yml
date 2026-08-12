@@ -22,16 +22,33 @@ jobs:
       - name: Install Dependencies & Cross-Compiler
         run: |
           sudo apt-get update
-          sudo apt-get install -y g++-aarch64-linux-gnu zstd libvulkan-dev
+          sudo apt-get install -y \
+            meson \
+            ninja-build \
+            bison \
+            flex \
+            python3-mako \
+            python3-yaml \
+            g++-aarch64-linux-gnu \
+            gcc-aarch64-linux-gnu \
+            zstd \
+            libvulkan-dev
 
-      - name: Build Shared Library
+      - name: Clone Mesa 25.2
         run: |
+          git clone --depth 1 --branch 25.2 https://gitlab.freedesktop.org/mesa/mesa.git mesa
+
+      - name: Configure Meson Build
+        run: |
+          meson setup build \
+            --cross-file cross_aarch64.txt \
+            --buildtype release
+
+      - name: Compile Shared Library with Ninja
+        run: |
+          ninja -C build
           mkdir -p usr/lib
-          aarch64-linux-gnu-g++ -shared -fPIC -O3 \
-            src/bridge.cpp \
-            src/logic.cpp \
-            src/output.cpp \
-            -Iinclude -Isrc -I. -ldl -o usr/lib/libvulkan_wrapper.so
+          cp build/libvulkan_wrapper.so usr/lib/libvulkan_wrapper.so
 
       - name: Package Archive
         run: |
