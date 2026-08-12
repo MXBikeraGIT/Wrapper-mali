@@ -1,4 +1,4 @@
-#include <vulkan/vulkan.h>
+#include "dispatch.h"
 #include <dlfcn.h>
 #include <android/log.h>
 
@@ -9,114 +9,91 @@
 static void* g_real_vulkan_handle = nullptr;
 static PFN_vkGetInstanceProcAddr g_real_vkGetInstanceProcAddr = nullptr;
 
-extern "C" void init_android_vulkan() {
-    if (g_real_vulkan_handle) return;
+static std::unordered_map<VkInstance, InstanceDispatchTable> g_instance_map;
+static std::mutex g_instance_mutex;
 
-    // Scan standard Android system and vendor driver paths
-    const char* candidate_paths[] = {
+static std::unordered_map<VkDevice, DeviceDispatchTable> g_device_map;
+static std::mutex g_device_mutex;
+
+extern "C" void init_android_vulkan() {
+    if (g_real_vulkan_handle && g_real_vkGetInstanceProcAddr) return;
+
+    LOGI("Loading system Vulkan library...");
+    const char* paths[] = {
         "/system/lib64/libvulkan.so",
         "/vendor/lib64/hw/vulkan.mali.so",
-        "/vendor/lib64/egl/vulkan.mali.so",
-        "/system/lib/libvulkan.so",
+        "/apex/com.android.runtime/lib64/bionic/libvulkan.so",
         "libvulkan.so.1",
+        "libvulkan.so",
         nullptr
     };
 
-    for (int i = 0; candidate_paths[i] != nullptr; ++i) {
-        g_real_vulkan_handle = dlopen(candidate_paths[i], RTLD_NOW | RTLD_LOCAL);
+    for (int i = 0; paths[i] != nullptr; ++i) {
+        g_real_vulkan_handle = dlopen(paths[i], RTLD_NOW | RTLD_GLOBAL);
         if (g_real_vulkan_handle) {
-            LOGI("Successfully loaded real driver: %s", candidate_paths[i]);
+            LOGI("Loaded driver at %s", paths[i]);
             break;
         }
     }
 
-    if (!g_real_vulkan_handle) {
-        LOGE("Failed to open real Vulkan driver handle!");
-        return;
-    }
-
-    g_real_vkGetInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
-        dlsym(g_real_vulkan_handle, "vkGetInstanceProcAddr")
-    );
-}
-
-extern "C" PFN_vkVoidFunction get_real_proc_addr(VkInstance instance, const char* pName) {
-    if (!g_real_vulkan_handle) {
-        init_android_vulkan();
-    }
-
-    if (g_real_vkGetInstanceProcAddr) {
-        PFN_vkVoidFunction proc = g_real_vkGetInstanceProcAddr(instance, pName);
-        if (proc) return proc;
-    }
-
     if (g_real_vulkan_handle) {
-        return reinterpret_cast<PFN_vkVoidFunction>(dlsym(g_real_vulkan_handle, pName));
+        g_real_vkGetInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
+            dlsym(g_real_vulkan_handle, "vkGetInstanceProcAddr")
+        );
     }
-
-    return nullptr;
 }
 
-extern "C" {
-
-VkResult call_real_vkEnumerateDeviceExtensionProperties(
-    VkPhysicalDevice physicalDevice,
-    const char* pLayerName,
-    uint32_t* pPropertyCount,
-    VkExtensionProperties* pProperties)
-{
-    auto real_fn = reinterpret_cast<PFN_vkEnumerateDeviceExtensionProperties>(
-        get_real_proc_addr(nullptr, "vkEnumerateDeviceExtensionProperties"));
-    if (!real_fn) return VK_ERROR_INITIALIZATION_FAILED;
-    return real_fn(physicalDevice, pLayerName, pPropertyCount, pProperties);
+extern "C" PFN_vkGetInstanceProcAddr get_global_vkGetInstanceProcAddr() {
+    init_android_vulkan();
+    return g_real_vkGetInstanceProcAddr;
 }
 
-void call_real_vkGetPhysicalDeviceFeatures2(
-    VkPhysicalDevice physicalDevice,
-    VkPhysicalDeviceFeatures2* pFeatures)
-{
-    auto real_fn = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(
-        get_real_proc_addr(nullptr, "vkGetPhysicalDeviceFeatures2"));
-    if (!real_fn) {
-        real_fn = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2>(
-            get_real_proc_addr(nullptr, "vkGetPhysicalDeviceFeatures2KHR"));
-    }
-    if (real_fn) real_fn(physicalDevice, pFeatures);
+void register_instance(VkInstance wrapper_inst, VkInstance real_inst, PFN_vkGetInstanceProcAddr gpa) {
+    std::lock_guard<std::mutex> lock(g_instance_mutex);
+    InstanceDispatchTable table{};
+    table.real_instance = real_inst;
+    table.vkGetInstanceProcAddr = gpa;
+
+    // Resolve instance-level function pointers
+    table.vkDestroyInstance = (PFN_vkDestroyInstance)gpa(real_inst, "vkDestroyInstance");
+    table.vkEnumeratePhysicalDevices = (PFN_vkEnumeratePhysicalDevices)gpa(real_inst, "vkEnumeratePhysicalDevices");
+    table.vkGetPhysicalDeviceProperties = (PFN_vkGetPhysicalDeviceProperties)gpa(real_inst, "vkGetPhysicalDeviceProperties");
+    table.vkGetPhysicalDeviceProperties2 = (PFN_vkGetPhysicalDeviceProperties2)gpa(real_inst, "vkGetPhysicalDeviceProperties2");
+    table.vkCreateDevice = (PFN_vkCreateDevice)gpa(real_inst, "vkCreateDevice");
+
+    g_instance_map[wrapper_inst] = table;
 }
 
-VkResult call_real_vkCreateDevice(
-    VkPhysicalDevice physicalDevice,
-    const VkDeviceCreateInfo* pCreateInfo,
-    const VkAllocationCallbacks* pAllocator,
-    VkDevice* pDevice)
-{
-    auto real_fn = reinterpret_cast<PFN_vkCreateDevice>(
-        get_real_proc_addr(nullptr, "vkCreateDevice"));
-    if (!real_fn) return VK_ERROR_INITIALIZATION_FAILED;
-    return real_fn(physicalDevice, pCreateInfo, pAllocator, pDevice);
+void unregister_instance(VkInstance wrapper_inst) {
+    std::lock_guard<std::mutex> lock(g_instance_mutex);
+    g_instance_map.erase(wrapper_inst);
 }
 
-VkResult call_real_vkCreateShaderModule(
-    VkDevice device,
-    const VkShaderModuleCreateInfo* pCreateInfo,
-    const VkAllocationCallbacks* pAllocator,
-    VkShaderModule* pShaderModule)
-{
-    auto real_fn = reinterpret_cast<PFN_vkCreateShaderModule>(
-        get_real_proc_addr(nullptr, "vkCreateShaderModule"));
-    if (!real_fn) return VK_ERROR_INITIALIZATION_FAILED;
-    return real_fn(device, pCreateInfo, pAllocator, pShaderModule);
+InstanceDispatchTable* get_instance_dispatch(VkInstance inst) {
+    std::lock_guard<std::mutex> lock(g_instance_mutex);
+    auto it = g_instance_map.find(inst);
+    return (it != g_instance_map.end()) ? &it->second : nullptr;
 }
 
-VkResult call_real_vkCreateInstance(
-    const VkInstanceCreateInfo* pCreateInfo,
-    const VkAllocationCallbacks* pAllocator,
-    VkInstance* pInstance)
-{
-    auto real_fn = reinterpret_cast<PFN_vkCreateInstance>(
-        get_real_proc_addr(nullptr, "vkCreateInstance"));
-    if (!real_fn) return VK_ERROR_INITIALIZATION_FAILED;
-    return real_fn(pCreateInfo, pAllocator, pInstance);
+void register_device(VkDevice wrapper_dev, VkDevice real_dev, PFN_vkGetDeviceProcAddr gda) {
+    std::lock_guard<std::mutex> lock(g_device_mutex);
+    DeviceDispatchTable table{};
+    table.real_device = real_dev;
+    table.vkGetDeviceProcAddr = gda;
+
+    table.vkDestroyDevice = (PFN_vkDestroyDevice)gda(real_dev, "vkDestroyDevice");
+    table.vkCreateShaderModule = (PFN_vkCreateShaderModule)gda(real_dev, "vkCreateShaderModule");
+
+    g_device_map[wrapper_dev] = table;
 }
 
-} // extern "C"
+void unregister_device(VkDevice wrapper_dev) {
+    std::lock_guard<std::mutex> lock(g_device_mutex);
+    g_device_map.erase(wrapper_dev);
+}
+
+DeviceDispatchTable* get_device_dispatch(VkDevice dev) {
+    std::lock_guard<std::mutex> lock(g_device_mutex);
+    auto it = g_device_map.find(dev);
+    return (it != g_device_map.end()) ? &it->second : nullptr;
+}
