@@ -17,17 +17,17 @@ jobs:
       - name: Setup Compiler Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y meson ninja-build g++-aarch64-linux-gnu
+          sudo apt-get install -y g++-aarch64-linux-gnu
 
       - name: Compile libvulkan_wrapper.so
         run: |
           mkdir -p usr/lib
-          aarch64-linux-gnu-g++ -shared -fPIC -O3 src/vulkan_wrapper.cpp -o usr/lib/libvulkan_wrapper.so
+          aarch64-linux-gnu-g++ -shared -fPIC -O3 bridge.cpp logic.cpp output.cpp -I. -ldl -o usr/lib/libvulkan_wrapper.so
 
-      - name: Upload Vulkan Wrapper Artifact
+      - name: Stash Wrapper Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: vulkan-wrapper-so
+          name: raw-vulkan-wrapper-so
           path: usr/lib/libvulkan_wrapper.so
 
   build-hook:
@@ -44,13 +44,29 @@ jobs:
       - name: Compile libmain_hook.so
         run: |
           mkdir -p usr/lib
-          aarch64-linux-gnu-g++ -shared -fPIC -O3 src/main_hook.cpp -Iinclude -ldl -o usr/lib/libmain_hook.so
+          aarch64-linux-gnu-g++ -shared -fPIC -O3 main_hook.cpp -Iinclude -ldl -o usr/lib/libmain_hook.so
 
-      - name: Upload Main Hook Artifact
+      - name: Stash Hook Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: main-hook-so
+          name: raw-main-hook-so
           path: usr/lib/libmain_hook.so
+
+  package-standalone-so:
+    needs: build-wrapper
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Wrapper Binary
+        uses: actions/download-artifact@v4
+        with:
+          name: raw-vulkan-wrapper-so
+          path: standalone/
+
+      - name: Upload Standalone Shared Object Asset
+        uses: actions/upload-artifact@v4
+        with:
+          name: libvulkan_wrapper-standalone-release
+          path: standalone/libvulkan_wrapper.so
 
   package-tzst:
     needs: [build-wrapper, build-hook]
@@ -64,16 +80,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y zstd tar
 
-      - name: Download Wrapper Artifact
+      - name: Download Wrapper Binary
         uses: actions/download-artifact@v4
         with:
-          name: vulkan-wrapper-so
+          name: raw-vulkan-wrapper-so
           path: usr/lib/
 
-      - name: Download Hook Artifact
+      - name: Download Hook Binary
         uses: actions/download-artifact@v4
         with:
-          name: main-hook-so
+          name: raw-main-hook-so
           path: usr/lib/
 
       - name: Generate ICD Manifest
@@ -89,7 +105,7 @@ jobs:
           }
           EOF
 
-      - name: Create wrapper.tzst
+      - name: Create wrapper.tzst Archive
         run: |
           export COPYFILE_DISABLE=1
           tar --exclude='._*' \
@@ -102,8 +118,8 @@ jobs:
           mv wrapper.tzst usr/lib/
           ls -la usr/lib/
 
-      - name: Upload Release Artifacts
+      - name: Upload TZST Bundle Release Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: vulkan-wrapper-tzst-release
+          name: vulkan-wrapper-tzst-bundle-release
           path: usr/lib/
