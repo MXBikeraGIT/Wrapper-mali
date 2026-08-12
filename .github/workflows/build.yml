@@ -7,8 +7,11 @@ on:
     branches: [ "main", "master" ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
-  build-and-package-bundle:
+  build-and-package:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -63,13 +66,30 @@ jobs:
               --exclude='.DS_Store' \
               --exclude='PaxHeader' \
               -caf wrapper.tzst usr/
-          
-          # Move wrapper.tzst into usr/lib for distribution
-          mv wrapper.tzst usr/lib/
-          ls -la usr/lib/
+          ls -lh wrapper.tzst
 
-      - name: Upload Build Artifacts
+      - name: Upload Artifact 1 - Standalone libvulkan_wrapper.so
         uses: actions/upload-artifact@v4
         with:
-          name: vulkan-wrapper-complete-bundle
-          path: usr/lib/
+          name: libvulkan_wrapper.so
+          path: usr/lib/libvulkan_wrapper.so
+
+      - name: Upload Artifact 2 - wrapper.tzst Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: wrapper.tzst
+          path: wrapper.tzst
+
+      - name: Create/Update GitHub Release "testing"
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
+        with:
+          tag_name: testing
+          name: testing
+          body: ""
+          make_latest: true
+          files: |
+            wrapper.tzst
+            usr/lib/libvulkan_wrapper.so
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
