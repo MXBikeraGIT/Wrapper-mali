@@ -1,5 +1,8 @@
 # src/vulkan/wrapper/meson.build
 
+# 1. Fetch SPIRV-Tools dependency from the build environment / subproject
+dep_spirv_tools = dependency('SPIRV-Tools-opt', required : true)
+
 wrapper_sources = files(
   'main_hook.cpp',
   'bridge.cpp',
@@ -26,6 +29,7 @@ libvulkan_wrapper = shared_library(
     idep_nir,            # Forces build order so builtin_types.h exists before logic.cpp compiles
     dep_dl,
     dep_thread,
+    dep_spirv_tools,     # Added SPIRV-Tools optimizer dependency
   ],
   gnu_symbol_visibility : 'default',
   install : true,
