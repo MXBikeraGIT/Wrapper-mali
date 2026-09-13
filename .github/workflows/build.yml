@@ -69,7 +69,7 @@ jobs:
             libxcb-present-dev:arm64 \
             libxshmfence-dev:arm64 \
             spirv-tools:arm64 \
-            spirv-tools-dev:arm64
+            spirv-headers
 
           # 5. Upgrade Meson via PyPI
           pip3 install --upgrade meson --break-system-packages || pip3 install --upgrade meson
