@@ -1,6 +1,4 @@
-# src/vulkan/wrapper/meson.build
-
-# 1. Fetch SPIRV-Tools dependency from the build environment / subproject
+# Fetch spirv-tools dependency (and its headers)
 dep_spirv_tools = dependency('SPIRV-Tools-opt', required : true)
 
 wrapper_sources = files(
@@ -12,27 +10,28 @@ wrapper_sources = files(
 )
 
 wrapper_includes = [
-  inc_include,        # Top-level include/
-  inc_src,            # Top-level src/
-  inc_compiler,       # src/compiler/ (provides builtin_types.h)
-  inc_util,           # src/util/
-  inc_vulkan_util,    # src/vulkan/util/
+  inc_include,
+  inc_src,
+  inc_compiler,
+  inc_util,
+  inc_vulkan_util,
   include_directories('.'),
 ]
 
 libvulkan_wrapper = shared_library(
   'vulkan_wrapper',
   wrapper_sources,
-  include_directories : wrapper_includes,
+  include_directories : [
+    wrapper_includes,
+    # Pull in spirv-tools include paths explicitly if the dependency is isolated
+    dep_spirv_tools.partial_feature_inputs(compile_args : true, includes : true),
+  ],
   dependencies : [
-    idep_vulkan_runtime, # Mesa's internal Vulkan runtime
-    idep_nir,            # Forces build order so builtin_types.h exists before logic.cpp compiles
+    idep_vulkan_runtime,
+    idep_nir,
     dep_dl,
     dep_thread,
-    dep_spirv_tools,     # SPIRV-Tools optimizer dependency
-  ],
-  link_with : [
-    libvtn,              # Links Mesa's internal spirv/libvtn.a (VTN translator)
+    dep_spirv_tools,
   ],
   gnu_symbol_visibility : 'default',
   install : true,
