@@ -31,19 +31,28 @@ VKAPI_ATTR VkResult VKAPI_CALL wrapper_vkCreateShaderModule(
 }
 #endif
 
-// --- Real Driver Proc Procurement ---
-bool init_real_driver();
-PFN_vkVoidFunction get_real_instance_proc(VkInstance instance, const char* name);
-PFN_vkVoidFunction get_real_device_proc(VkDevice device, const char* name);
+// --- Real Driver Proc Procurement (C++ linkage for templates) ---
+#ifdef __cplusplus
+extern "C" {
+#endif
+    // Base procurement functions (compiled with C linkage to prevent mangling mismatches)
+    PFN_vkVoidFunction get_real_instance_proc(VkInstance instance, const char* name);
+    PFN_vkVoidFunction get_real_device_proc(VkDevice device, const char* name);
+    bool init_real_driver();
+#ifdef __cplusplus
+}
+#endif
 
+#ifdef __cplusplus
 template<typename T>
-T get_real_device_proc(VkDevice device, const char* name) {
+inline T get_real_device_proc(VkDevice device, const char* name) {
     return reinterpret_cast<T>(get_real_device_proc(device, name));
 }
 
 template<typename T>
-T get_real_instance_proc(VkInstance instance, const char* name) {
+inline T get_real_instance_proc(VkInstance instance, const char* name) {
     return reinterpret_cast<T>(get_real_instance_proc(instance, name));
 }
+#endif
 
 #endif // BRIDGE_H
