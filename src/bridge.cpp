@@ -1,24 +1,24 @@
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
+
 #include <vulkan/vulkan.h>
 #include <android/log.h>
 #include <dlfcn.h>
 #include <cstdio>
+#include <cstring>
 #include <mutex>
 #include "bridge.h"
 
-// Global mutex shared across wrapper modules to prevent log conflicts
 std::mutex g_wrapper_log_mutex;
 
-// Handle to system Vulkan driver library
 static void* g_vulkan_lib_handle = nullptr;
 static PFN_vkGetInstanceProcAddr g_real_vkGetInstanceProcAddr = nullptr;
 static PFN_vkGetDeviceProcAddr g_real_vkGetDeviceProcAddr = nullptr;
 
-// Initialize real system Vulkan driver procurement
 extern "C" bool init_real_driver() {
     if (g_vulkan_lib_handle) return true;
 
-    // Load standard Android Vulkan library
     g_vulkan_lib_handle = dlopen("libvulkan.so", RTLD_NOW | RTLD_LOCAL);
     if (!g_vulkan_lib_handle) {
         __android_log_print(ANDROID_LOG_ERROR, "Winlator-Bridge", "Failed to dlopen libvulkan.so: %s", dlerror());
@@ -36,7 +36,6 @@ extern "C" bool init_real_driver() {
     return (g_real_vkGetInstanceProcAddr != nullptr);
 }
 
-// Global symbol resolver for device functions
 extern "C" PFN_vkVoidFunction get_real_device_proc(VkDevice device, const char* name) {
     if (!init_real_driver()) return nullptr;
 
@@ -45,11 +44,9 @@ extern "C" PFN_vkVoidFunction get_real_device_proc(VkDevice device, const char* 
         if (proc) return proc;
     }
 
-    // Fallback to dlsym lookup directly on real driver library
     return reinterpret_cast<PFN_vkVoidFunction>(dlsym(g_vulkan_lib_handle, name));
 }
 
-// Global symbol resolver for instance functions
 extern "C" PFN_vkVoidFunction get_real_instance_proc(VkInstance instance, const char* name) {
     if (!init_real_driver()) return nullptr;
 
@@ -61,15 +58,25 @@ extern "C" PFN_vkVoidFunction get_real_instance_proc(VkInstance instance, const 
     return reinterpret_cast<PFN_vkVoidFunction>(dlsym(g_vulkan_lib_handle, name));
 }
 
-// Function prototype implemented in logic.cpp
-extern "C" VkResult logic_process_spirv(
-    VkDevice device,
-    const VkShaderModuleCreateInfo* pCreateInfo,
-    const VkAllocationCallbacks* pAllocator,
-    VkShaderModule* pShaderModule
-);
+// Global Interception Hooks for GetProcAddr
+extern "C" VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL wrapper_vkGetDeviceProcAddr(VkDevice device, const char* pName) {
+    if (pName && strcmp(pName, "vkCreateShaderModule") == 0) {
+        return reinterpret_cast<PFN_vkVoidFunction>(wrapper_vkCreateShaderModule);
+    }
+    return get_real_device_proc(device, pName);
+}
 
-// Bridge Hook Entry Point
+extern "C" VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL wrapper_vkGetInstanceProcAddr(VkInstance instance, const char* pName) {
+    if (pName && strcmp(pName, "vkCreateShaderModule") == 0) {
+        return reinterpret_cast<PFN_vkVoidFunction>(wrapper_vkCreateShaderModule);
+    }
+    if (pName && strcmp(pName, "vkGetDeviceProcAddr") == 0) {
+        return reinterpret_cast<PFN_vkVoidFunction>(wrapper_vkGetDeviceProcAddr);
+    }
+    return get_real_instance_proc(instance, pName);
+}
+
+// Shader Hook Bridge Entry Point
 extern "C" VKAPI_ATTR VkResult VKAPI_CALL wrapper_vkCreateShaderModule(
     VkDevice device,
     const VkShaderModuleCreateInfo* pCreateInfo,
@@ -80,15 +87,19 @@ extern "C" VKAPI_ATTR VkResult VKAPI_CALL wrapper_vkCreateShaderModule(
         std::lock_guard<std::mutex> lock(g_wrapper_log_mutex);
         __android_log_print(ANDROID_LOG_INFO, "Winlator-Wrapper", 
                             "Intercepted vkCreateShaderModule (Size: %zu bytes)", pCreateInfo->codeSize);
-        fprintf(stderr, "[Winlator-Wrapper] Intercepted vkCreateShaderModule (Size: %zu bytes)\n", pCreateInfo->codeSize);
-        fflush(stderr);
     }
-
-    // Forward execution directly to logic stage for spirv-tools transformation
     return logic_process_spirv(device, pCreateInfo, pAllocator, pShaderModule);
 }
 
-// Fallback alias for bridge procurement
+// Export standard C symbols for dynamic lookup
+extern "C" VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice device, const char* pName) {
+    return wrapper_vkGetDeviceProcAddr(device, pName);
+}
+
+extern "C" VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instance, const char* pName) {
+    return wrapper_vkGetInstanceProcAddr(instance, pName);
+}
+
 extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule(
     VkDevice device,
     const VkShaderModuleCreateInfo* pCreateInfo,
