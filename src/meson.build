@@ -29,7 +29,10 @@ libvulkan_wrapper = shared_library(
     idep_nir,            # Forces build order so builtin_types.h exists before logic.cpp compiles
     dep_dl,
     dep_thread,
-    dep_spirv_tools,     # Added SPIRV-Tools optimizer dependency
+    dep_spirv_tools,     # SPIRV-Tools optimizer dependency
+  ],
+  link_with : [
+    libvtn,              # Links Mesa's internal spirv/libvtn.a (VTN translator)
   ],
   gnu_symbol_visibility : 'default',
   install : true,
