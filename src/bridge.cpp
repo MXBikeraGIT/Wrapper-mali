@@ -2,6 +2,7 @@
 #include <android/log.h>
 #include <cstdio>
 #include <mutex>
+#include "bridge.h"
 
 // Global mutex shared across wrapper modules to prevent log conflicts
 std::mutex g_wrapper_log_mutex;
@@ -22,7 +23,7 @@ extern "C" VKAPI_ATTR VkResult VKAPI_CALL wrapper_vkCreateShaderModule(
     VkShaderModule* pShaderModule
 ) {
     if (pCreateInfo && pCreateInfo->pCode && pCreateInfo->codeSize > 0) {
-        // Safe, non-blocking single log entry
+        // Safe, single log entry per shader module (no 3-second thread block)
         std::lock_guard<std::mutex> lock(g_wrapper_log_mutex);
         __android_log_print(ANDROID_LOG_INFO, "Winlator-Wrapper", 
                             "Intercepted vkCreateShaderModule (Size: %zu bytes)", pCreateInfo->codeSize);
