@@ -1,13 +1,9 @@
 #define _GNU_SOURCE
 #include <vulkan/vulkan.h>
-#include <dlfcn.h>
 #include <android/log.h>
 #include <cstdio>
-#include <chrono>
-#include <thread>
 #include <mutex>
-
-extern std::mutex g_wrapper_log_mutex;
+#include "bridge.h"
 
 // Output Stage Dispatch Handler
 extern "C" VkResult output_send_to_driver(
@@ -16,35 +12,26 @@ extern "C" VkResult output_send_to_driver(
     const VkAllocationCallbacks* pAllocator,
     VkShaderModule* pShaderModule
 ) {
-    // Wait until logic log finishes before spamming output logs
+    // Single non-blocking log entry for output dispatch
     {
         std::lock_guard<std::mutex> lock(g_wrapper_log_mutex);
-        auto start_time = std::chrono::steady_clock::now();
-
-        while (std::chrono::steady_clock::now() - start_time < std::chrono::seconds(3)) {
-            __android_log_print(ANDROID_LOG_INFO, "Winlator", "done");
-            fprintf(stderr, "[Winlator] done\n");
-            fflush(stderr);
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        }
+        __android_log_print(ANDROID_LOG_INFO, "Winlator-Output", 
+                            "Forwarding shader module to underlying Mali driver...");
+        fprintf(stderr, "[Winlator-Output] Forwarding shader module to underlying Mali driver...\n");
+        fflush(stderr);
     }
 
-    // Dynamically fetch target Vulkan driver symbol from libvulkan.so
-    typedef VkResult (VKAPI_PTR *PFN_vkCreateShaderModule)(
-        VkDevice, const VkShaderModuleCreateInfo*, const VkAllocationCallbacks*, VkShaderModule*
-    );
-
+    // Resolve real vkCreateShaderModule function pointer from real driver proc procurement
     static PFN_vkCreateShaderModule real_vkCreateShaderModule = nullptr;
     if (!real_vkCreateShaderModule) {
-        real_vkCreateShaderModule = reinterpret_cast<PFN_vkCreateShaderModule>(
-            dlsym(RTLD_NEXT, "vkCreateShaderModule")
-        );
+        real_vkCreateShaderModule = get_real_device_proc<PFN_vkCreateShaderModule>(device, "vkCreateShaderModule");
     }
 
     if (real_vkCreateShaderModule) {
         return real_vkCreateShaderModule(device, pCreateInfo, pAllocator, pShaderModule);
     }
 
+    __android_log_print(ANDROID_LOG_ERROR, "Winlator-Output", "Failed to resolve real vkCreateShaderModule symbol!");
     return VK_ERROR_INITIALIZATION_FAILED;
 }
 
