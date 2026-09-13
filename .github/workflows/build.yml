@@ -68,7 +68,9 @@ jobs:
             libxcb-xfixes0-dev:arm64 \
             libxcb-dri3-dev:arm64 \
             libxcb-present-dev:arm64 \
-            libxshmfence-dev:arm64
+            libxshmfence-dev:arm64 \
+            libspirv-tools-dev:arm64 \
+            spirv-tools:arm64
 
           # 5. Upgrade Meson via PyPI
           pip3 install --upgrade meson --break-system-packages || pip3 install --upgrade meson
@@ -126,6 +128,10 @@ jobs:
           python3 -c "
           content = '''# src/vulkan/wrapper/meson.build (Generated during CI)
 
+          cpp = meson.get_compiler('cpp')
+          dep_spirv_tools_opt = cpp.find_library('SPIRV-Tools-opt', required : true)
+          dep_spirv_tools = cpp.find_library('SPIRV-Tools', required : true)
+
           wrapper_sources = files(
             'main_hook.cpp',
             'bridge.cpp',
@@ -141,6 +147,7 @@ jobs:
             inc_util,           # Provides src/util/ (ralloc.h, etc.)
             inc_vulkan_util,    # Provides src/vulkan/util/
             include_directories('.'),
+            include_directories('/usr/include'),
           ]
 
           libvulkan_wrapper = shared_library(
@@ -152,6 +159,8 @@ jobs:
               idep_nir,            # Forces Python header generation (builtin_types.h) before building
               dep_dl,
               dep_thread,
+              dep_spirv_tools_opt,
+              dep_spirv_tools,
             ],
             gnu_symbol_visibility : 'default', # Export symbols so dlsym finds them in Winlator
             install : true,
