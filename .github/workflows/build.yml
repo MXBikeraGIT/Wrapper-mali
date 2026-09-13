@@ -23,12 +23,11 @@ jobs:
           # 1. Enable ARM64 architecture
           sudo dpkg --add-architecture arm64
 
-          # 2. Restrict Ubuntu 24.04 DEB822 default sources to x86
+          # 2. Configure Ubuntu DEB822 sources for x86 (Ubuntu 24.04 compatible)
           if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
-            sudo sed -i 's/Types: deb/Types: deb\nArchitectures: amd64 i386/' /etc/apt/sources.list.d/ubuntu.sources
+            sudo sed -i '/^URIs:/a Architectures: amd64 i386' /etc/apt/sources.list.d/ubuntu.sources
           fi
 
-          # Restrict legacy sources.list if present
           if [ -f /etc/apt/sources.list ]; then
             sudo sed -i 's/deb http/deb [arch=amd64,i386] http/g' /etc/apt/sources.list
           fi
@@ -69,8 +68,8 @@ jobs:
             libxcb-dri3-dev:arm64 \
             libxcb-present-dev:arm64 \
             libxshmfence-dev:arm64 \
-            libspirv-tools-dev:arm64 \
-            spirv-tools:arm64
+            spirv-tools:arm64 \
+            spirv-tools-dev:arm64
 
           # 5. Upgrade Meson via PyPI
           pip3 install --upgrade meson --break-system-packages || pip3 install --upgrade meson
@@ -148,6 +147,7 @@ jobs:
             inc_vulkan_util,    # Provides src/vulkan/util/
             include_directories('.'),
             include_directories('/usr/include'),
+            include_directories('/usr/include/aarch64-linux-gnu'),
           ]
 
           libvulkan_wrapper = shared_library(
