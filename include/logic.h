@@ -1,4 +1,5 @@
-#pragma once
+#ifndef LOGIC_H
+#define LOGIC_H
 
 #include <vulkan/vulkan.h>
 
@@ -6,38 +7,16 @@
 extern "C" {
 #endif
 
-// Shader module interception and SPIR-V sanitization entry point (called by bridge.cpp)
+// Sanitizes SPIR-V bytecode and hands it off to output stage
 VkResult logic_process_spirv(
     VkDevice device,
     const VkShaderModuleCreateInfo* pCreateInfo,
     const VkAllocationCallbacks* pAllocator,
-    VkShaderModule* pShaderModule);
-
-// Instance creation override
-VkResult logic_vkCreateInstance(
-    const VkInstanceCreateInfo* pCreateInfo,
-    const VkAllocationCallbacks* pAllocator,
-    VkInstance* pInstance);
-
-// Device extension enumeration override
-VkResult logic_vkEnumerateDeviceExtensionProperties(
-    VkPhysicalDevice physicalDevice,
-    const char* pLayerName,
-    uint32_t* pPropertyCount,
-    VkExtensionProperties* pProperties);
-
-// Physical device feature queries override
-void logic_vkGetPhysicalDeviceFeatures2(
-    VkPhysicalDevice physicalDevice,
-    VkPhysicalDeviceFeatures2* pFeatures);
-
-// Logical device creation override
-VkResult logic_vkCreateDevice(
-    VkPhysicalDevice physicalDevice,
-    const VkDeviceCreateInfo* pCreateInfo,
-    const VkAllocationCallbacks* pAllocator,
-    VkDevice* pDevice);
+    VkShaderModule* pShaderModule
+);
 
 #ifdef __cplusplus
 }
 #endif
+
+#endif // LOGIC_H
